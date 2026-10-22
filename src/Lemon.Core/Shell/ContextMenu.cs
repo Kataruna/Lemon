@@ -14,7 +14,7 @@ public static partial class ContextMenu
     /// <summary>Quick-convert entries offered in the submenu, per kind of source file.</summary>
     private static readonly Dictionary<MediaKind, string[]> QuickTargets = new()
     {
-        [MediaKind.Image] = ["png", "jpg", "webp"],
+        [MediaKind.Image] = ["png", "jpg", "webp", "pdf"],
         [MediaKind.Audio] = ["mp3", "m4a", "wav"],
         [MediaKind.Video] = ["mp4", "mp3", "gif"],
         [MediaKind.Document] = ["pdf", "docx", "html"],
@@ -29,7 +29,8 @@ public static partial class ContextMenu
 
     /// <summary>
     /// Registers the menu for each extension. <paramref name="canConvert"/> filters out quick targets
-    /// that the current machine can't produce (e.g. PDF without LibreOffice).
+    /// that the current machine can't produce (e.g. PDF without LibreOffice); it's also asked about
+    /// <see cref="Preset.SameFormat"/> to decide whether to offer "Optimize".
     /// </summary>
     public static void Register(string exePath, Func<string, string, bool> canConvert, RegistryKey? classesRoot = null)
     {
@@ -42,7 +43,7 @@ public static partial class ContextMenu
             classes.DeleteSubKeyTree(VerbPath(ext), throwOnMissingSubKey: false);
 
             // No menu for files this machine can't convert at all (e.g. PDF, or .docx without Pandoc/LibreOffice).
-            if (!FormatCatalog.Extensions.Any(to => canConvert(ext, to)))
+            if (!FormatCatalog.Extensions.Append(Preset.SameFormat).Any(to => canConvert(ext, to)))
                 continue;
 
             var kind = FormatCatalog.KindOf(ext)!.Value;
@@ -53,6 +54,8 @@ public static partial class ContextMenu
 
             AddCommand(verb, "01open", "Open in Lemon…", $"\"{exePath}\" \"%1\"");
             var order = 2;
+            if (canConvert(ext, Preset.SameFormat))
+                AddCommand(verb, $"{order++:00}optimize", "Optimize (smaller file)", $"\"{exePath}\" {LaunchRequest.OptimizeArgument} \"%1\"");
             foreach (var target in QuickTargets[kind].Where(t => t != ext && canConvert(ext, t)))
                 AddCommand(verb, $"{order++:00}to{target}", $"To {target.ToUpperInvariant()}", $"\"{exePath}\" --to {target} \"%1\"");
         }

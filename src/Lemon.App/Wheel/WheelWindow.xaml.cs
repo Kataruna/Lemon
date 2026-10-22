@@ -261,7 +261,7 @@ public sealed partial class WheelWindow : Window
             App.Queue.Add(paths, startWith: preset);
             Celebrate(hit);
             var files = paths.Count == 1 ? "1 file" : $"{paths.Count} files";
-            SetHub($"Converting {files} to {ConversionWheel.Label(preset).Title}", icon: "îœ¾");
+            SetHub(preset.IsOptimize ? $"Optimizing {files}" : $"Converting {files} to {ConversionWheel.Label(preset).Title}", icon: "îœ¾");
             ScaleFrom(_hubIcon, Vector3.Zero, Vector3.One, damping: 0.4f);
             HideAfter(TimeSpan.FromMilliseconds(950));
         }

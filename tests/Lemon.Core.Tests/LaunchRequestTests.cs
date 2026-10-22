@@ -11,6 +11,15 @@ public class LaunchRequestTests
     }
 
     [Fact]
+    public void OptimizeFlagPicksTheSameFormatTarget()
+    {
+        var request = LaunchRequest.Parse(["--optimize", @"C:\shot.png"]);
+        Assert.Equal(Preset.SameFormat, request.QuickTarget);
+        Assert.Equal([@"C:\shot.png"], request.Files);
+        Assert.True(request.StaysInBackground);
+    }
+
+    [Fact]
     public void PlainLaunchIsEmpty() => Assert.True(LaunchRequest.Parse([]).IsEmpty);
 
     [Fact]

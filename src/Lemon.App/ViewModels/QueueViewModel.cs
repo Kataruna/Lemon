@@ -41,6 +41,9 @@ public sealed partial class QueueViewModel : ObservableObject
     public partial bool HasFinishedJobs { get; private set; }
 
     [ObservableProperty]
+    public partial bool HasOptimizableJobs { get; private set; }
+
+    [ObservableProperty]
     public partial string Summary { get; private set; } = "";
 
     /// <summary>One-off message such as "2 files were skipped".</summary>
@@ -156,6 +159,20 @@ public sealed partial class QueueViewModel : ObservableObject
             .OrderBy(g => g.Key)
             .Select(g => (g.Key, (IReadOnlyList<Preset>)g.SelectMany(j => j.AvailablePresets).DistinctBy(p => p.Id).ToList()));
 
+    /// <summary>Switches every file that can be optimized to Optimize mode and starts them.</summary>
+    public void OptimizeAll()
+    {
+        var jobs = new List<JobViewModel>();
+        foreach (var job in Jobs.Where(j => j.IsEditable))
+        {
+            if (job.AvailablePresets.FirstOrDefault(p => p.IsOptimize) is not { } optimize)
+                continue;
+            job.SelectedPreset = optimize;
+            jobs.Add(job);
+        }
+        Enqueue(jobs);
+    }
+
     public void ApplyToAll(MediaKind kind, Preset preset)
     {
         foreach (var job in Jobs.Where(j => j.IsEditable && j.Kind == kind && j.AvailablePresets.Contains(preset)))
@@ -198,7 +215,7 @@ public sealed partial class QueueViewModel : ObservableObject
         Pump();
     }
 
-    /// <summary>The presets that can convert this file, same kind of output first.</summary>
+    /// <summary>The presets that can convert this file: Optimize, then the same kind of output, then the rest.</summary>
     public IReadOnlyList<Preset> PresetsFor(string path)
     {
         var kind = FormatCatalog.KindOf(path);
@@ -209,10 +226,11 @@ public sealed partial class QueueViewModel : ObservableObject
             .Where(p => FormatCatalog.NormalizeExtension(p.TargetExtension) != extension || HasOptions(p))
             // Still-image presets (e.g. plain "GIF") make full-size, full-frame-rate GIFs from video; only offer
             // image presets that were made for animation.
-            .Where(p => kind != MediaKind.Video || p.TargetKind != MediaKind.Image || p.Fps is not null)
+            .Where(p => p.IsOptimize || kind != MediaKind.Video || p.TargetKind != MediaKind.Image || p.Fps is not null)
             // ...and the other way round: animation presets mean nothing for a still image.
             .Where(p => kind != MediaKind.Image || p.Fps is null || extension is "gif" or "webp")
-            .OrderBy(p => p.TargetKind != kind)
+            .OrderBy(p => !p.IsOptimize)
+            .ThenBy(p => p.TargetKind != kind)
             .ToList();
     }
 
@@ -228,7 +246,10 @@ public sealed partial class QueueViewModel : ObservableObject
         }
 
         var extension = FormatCatalog.NormalizeExtension(path);
-        return last ?? presets.FirstOrDefault(p => FormatCatalog.NormalizeExtension(p.TargetExtension) != extension) ?? presets.FirstOrDefault();
+        // Optimize is listed first but only becomes the default once the user picks it (or it's all there is).
+        return last
+            ?? presets.FirstOrDefault(p => !p.IsOptimize && FormatCatalog.NormalizeExtension(p.TargetExtension) != extension)
+            ?? presets.FirstOrDefault();
     }
 
     private static bool HasOptions(Preset p) =>
@@ -296,6 +317,7 @@ public sealed partial class QueueViewModel : ObservableObject
     {
         HasStartableJobs = Jobs.Any(j => j.IsStartable);
         HasFinishedJobs = Jobs.Any(j => j.IsDone);
+        HasOptimizableJobs = Jobs.Any(j => j.IsEditable && j.AvailablePresets.Any(p => p.IsOptimize));
 
         var done = Jobs.Count(j => j.IsDone);
         var failed = Jobs.Count(j => j.IsFailed);

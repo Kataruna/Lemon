@@ -6,6 +6,7 @@ public enum ExternalTool
     Ffprobe,
     Pandoc,
     LibreOffice,
+    Ghostscript,
 }
 
 /// <summary>Finds the external programs Lemon drives: user override first, then PATH, then usual install folders.</summary>
@@ -17,6 +18,8 @@ public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, b
         ExternalTool.Ffmpeg or ExternalTool.Ffprobe => "winget install Gyan.FFmpeg",
         ExternalTool.Pandoc => "winget install JohnMacFarlane.Pandoc",
         ExternalTool.LibreOffice => "winget install TheDocumentFoundation.LibreOffice",
+        // Not on winget; Artifex only publishes installers on its own site.
+        ExternalTool.Ghostscript => "https://ghostscript.com/releases/gsdnld.html",
         _ => "",
     };
 
@@ -26,6 +29,7 @@ public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, b
         ExternalTool.Ffprobe => "FFprobe",
         ExternalTool.Pandoc => "Pandoc",
         ExternalTool.LibreOffice => "LibreOffice",
+        ExternalTool.Ghostscript => "Ghostscript",
         _ => tool.ToString(),
     };
 
@@ -50,6 +54,7 @@ public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, b
             ExternalTool.Ffprobe => "ffprobe.exe",
             ExternalTool.Pandoc => "pandoc.exe",
             ExternalTool.LibreOffice => "soffice.exe",
+            ExternalTool.Ghostscript => "gswin64c.exe",
             _ => throw new ArgumentOutOfRangeException(nameof(tool)),
         };
 
@@ -91,6 +96,15 @@ public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, b
                 break;
             case ExternalTool.LibreOffice:
                 yield return Path.Combine(programFiles, "LibreOffice", "program");
+                break;
+            case ExternalTool.Ghostscript:
+                // Each version installs into its own folder, e.g. C:\Program Files\gs\gs10.05.1\bin; prefer the newest.
+                var gs = Path.Combine(programFiles, "gs");
+                if (!Directory.Exists(gs))
+                    break;
+                foreach (var version in Directory.EnumerateDirectories(gs, "gs*")
+                             .OrderByDescending(d => Version.TryParse(Path.GetFileName(d)[2..], out var v) ? v : new Version()))
+                    yield return Path.Combine(version, "bin");
                 break;
         }
     }

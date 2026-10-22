@@ -154,9 +154,10 @@ public sealed partial class SettingsPage : Page
         var locator = new ToolLocator(tool => App.Settings.ToolPaths.GetValueOrDefault(tool));
         ToolList.ItemsSource = new[]
         {
-            Status(locator, ExternalTool.Ffmpeg, "Audio and video, and video to GIF"),
+            Status(locator, ExternalTool.Ffmpeg, "Audio and video, video to GIF, and optimizing video"),
             Status(locator, ExternalTool.Pandoc, "Word, OpenDocument, RTF, EPUB, HTML and Markdown"),
             Status(locator, ExternalTool.LibreOffice, "PDF output, plus Excel and PowerPoint to PDF"),
+            Status(locator, ExternalTool.Ghostscript, "Optimizing PDFs"),
         };
 
         // Re-register so the right-click menu offers targets that just became possible.

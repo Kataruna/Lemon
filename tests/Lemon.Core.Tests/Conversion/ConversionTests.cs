@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 using ImageMagick;
 using ImageMagick.Drawing;
 
@@ -51,6 +52,50 @@ public sealed class ConversionTests : IDisposable
             Assert.True(result.Width <= 256 && result.Height <= 256);
         else
             Assert.Equal(640u, result.Width);
+    }
+
+    private static string PdfText(string path) => System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(path));
+
+    private static int PdfPageCount(string text) => Regex.Matches(text, @"/Type\s*/Page\b(?!s)").Count;
+
+    [Theory]
+    [InlineData("jpg", "DCTDecode")]   // photos stay JPEG inside the PDF
+    [InlineData("png", "FlateDecode")] // graphics stay lossless
+    public async Task ConvertsImageToPdf(string sourceFormat, string expectedFilter)
+    {
+        var source = _temp.File("photo." + sourceFormat);
+        using (var image = new MagickImage("plasma:fractal", new MagickReadSettings { Width = 4032, Height = 3024 }))
+            image.Write(source);
+
+        var output = await _service.ConvertAsync(source, BuiltInPresets.All.Single(p => p.Id == "doc-pdf"), null);
+
+        var text = PdfText(output);
+        Assert.StartsWith("%PDF-", text);
+        Assert.Equal(1, PdfPageCount(text));
+        Assert.Contains("/" + expectedFilter, text);
+        // No density in the file: the page is scaled to fit A4 (842 pt tall) instead of a 56-inch page at 72 dpi.
+        var box = Regex.Match(text, @"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)").Groups;
+        Assert.InRange(double.Parse(box[1].Value, CultureInfo.InvariantCulture), 841, 843);
+        Assert.InRange(double.Parse(box[2].Value, CultureInfo.InvariantCulture), 630, 633);
+    }
+
+    [Fact]
+    public async Task MultiPageTiffBecomesMultiPagePdf()
+    {
+        var source = _temp.File("scan.tiff");
+        using (var pages = new MagickImageCollection())
+        {
+            for (var i = 0; i < 3; i++)
+                pages.Add(new MagickImage(MagickColors.White, 850, 1100) { Density = new Density(100, 100, DensityUnit.PixelsPerInch) });
+            pages.Write(source, MagickFormat.Tiff);
+        }
+
+        var output = await _service.ConvertAsync(source, BuiltInPresets.All.Single(p => p.Id == "doc-pdf"), null);
+
+        var text = PdfText(output);
+        Assert.Equal(3, PdfPageCount(text));
+        // 100 dpi fits on A4, so the page keeps its real size: 8.5 x 11 inches.
+        Assert.Matches(@"/MediaBox\s*\[\s*0\s+0\s+612\s+792\s*\]", text);
     }
 
     [Fact]
@@ -197,11 +242,5 @@ public sealed class ConversionTests : IDisposable
         var error = await Assert.ThrowsAsync<ConversionException>(() => _service.ConvertAsync(source, P("mp3"), _temp.File("out")));
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
         Assert.Empty(Directory.GetFiles(_temp.File("out")));
-    }
-
-    /// <summary>Unlike Progress&lt;T&gt;, reports synchronously so tests see every value before the await returns.</summary>
-    private sealed class SyncProgress(Action<double> report) : IProgress<double>
-    {
-        public void Report(double value) => report(value);
     }
 }

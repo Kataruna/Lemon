@@ -49,6 +49,15 @@
                     <MenuFlyout x:Name="SetAllMenu" Placement="BottomEdgeAlignedLeft" Opening="OnSetAllOpening" />
                 </DropDownButton.Flyout>
             </DropDownButton>
+            <Button
+                Click="OnOptimizeAll"
+                IsEnabled="{x:Bind Queue.HasOptimizableJobs, Mode=OneWay}"
+                ToolTipService.ToolTip="Make every file smaller, keeping its format and look" AutomationProperties.Name="Optimize all">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE945;" FontSize="16" />
+                    <TextBlock Text="Optimize all" />
+                </StackPanel>
+            </Button>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Spacing="8" Visibility="{x:Bind views:Ui.VisibleIfAnyText(Queue.Notice, Queue.MissingToolsMessage), Mode=OneWay}">
@@ -84,6 +93,10 @@
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Text="Images, audio, video and documents. Folders work too." />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Pick Optimize to make images, videos and PDFs smaller in the same format." />
                 <Button
                     Margin="0,8,0,0"
                     HorizontalAlignment="Center"

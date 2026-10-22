@@ -2,8 +2,12 @@ namespace Lemon.Core.Presets;
 
 public static class BuiltInPresets
 {
+    public const string OptimizeId = "optimize";
+
     public static IReadOnlyList<Preset> All { get; } =
     [
+        Make(OptimizeId, "Optimize – Smaller, same format", Preset.SameFormat),
+
         Make("img-png", "PNG", "png"),
         Make("img-jpg", "JPEG – High quality", "jpg", p => p with { Quality = 90 }),
         Make("img-webp", "WebP – Web optimized", "webp", p => p with { Quality = 80, MaxWidth = 1920, MaxHeight = 1920, StripMetadata = true }),

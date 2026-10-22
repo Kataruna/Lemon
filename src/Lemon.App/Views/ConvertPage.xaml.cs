@@ -125,6 +125,8 @@ public sealed partial class ConvertPage : Page
 
     private void OnConvert(object sender, RoutedEventArgs e) => Queue.Start();
 
+    private void OnOptimizeAll(object sender, RoutedEventArgs e) => Queue.OptimizeAll();
+
     private void OnCancelAll(object sender, RoutedEventArgs e) => Queue.CancelAll();
 
     private void OnClearFinished(object sender, RoutedEventArgs e) => Queue.ClearFinished();

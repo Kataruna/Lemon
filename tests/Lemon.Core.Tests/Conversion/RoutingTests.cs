@@ -10,6 +10,9 @@ public class RoutingTests
         var service = WithoutTools();
         Assert.IsType<MarkdownConverter>(service.FindConverter("md", "html"));
         Assert.IsType<ImageConverter>(service.FindConverter("png", "webp"));
+        Assert.IsType<ImageConverter>(service.FindConverter("jpg", "pdf"));
+        // Writing PDF is built in, but reading one would need Ghostscript.
+        Assert.Null(service.FindConverter("pdf", "png"));
         Assert.Null(service.FindConverter("wav", "mp3"));
         Assert.Null(service.FindConverter("docx", "pdf"));
     }

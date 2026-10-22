@@ -8,11 +8,12 @@ public static class OutputPaths
     /// Picks a file name for the converted output that never overwrites anything ("photo.png", then
     /// "photo (1).png", ...) and claims it by creating an empty placeholder, so parallel jobs can't collide.
     /// </summary>
-    public static string Reserve(string inputPath, string targetExtension, string? outputFolder = null)
+    /// <param name="suffix">Added to the name before the extension, e.g. " (optimized)".</param>
+    public static string Reserve(string inputPath, string targetExtension, string? outputFolder = null, string? suffix = null)
     {
         var folder = string.IsNullOrWhiteSpace(outputFolder) ? Path.GetDirectoryName(Path.GetFullPath(inputPath))! : outputFolder;
         Directory.CreateDirectory(folder);
-        var baseName = Path.GetFileNameWithoutExtension(inputPath);
+        var baseName = Path.GetFileNameWithoutExtension(inputPath) + suffix;
         var extension = "." + FormatCatalog.NormalizeExtension(targetExtension);
 
         lock (Gate)

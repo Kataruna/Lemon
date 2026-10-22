@@ -8,10 +8,10 @@ public static class ConversionWheel
     /// <summary>The most useful built-in presets per kind of file, in the order they go around the wheel.</summary>
     private static readonly Dictionary<MediaKind, string[]> Favorites = new()
     {
-        [MediaKind.Image] = ["img-png", "img-jpg", "img-webp", "img-avif", "img-ico", "img-gif", "img-tiff", "img-bmp"],
+        [MediaKind.Image] = [BuiltInPresets.OptimizeId, "img-png", "img-jpg", "img-webp", "doc-pdf", "img-avif", "img-ico", "img-gif", "img-tiff", "img-bmp"],
         [MediaKind.Audio] = ["aud-mp3-320", "aud-m4a", "aud-flac", "aud-wav", "aud-opus", "aud-ogg", "aud-mp3-192", "aud-aiff"],
-        [MediaKind.Video] = ["vid-mp4", "vid-mp4-720", "vid-webm", "vid-gif", "aud-mp3-320", "vid-mov", "vid-mkv", "aud-m4a"],
-        [MediaKind.Document] = ["doc-pdf", "doc-docx", "doc-html", "doc-txt", "doc-md", "doc-odt", "doc-rtf", "doc-epub"],
+        [MediaKind.Video] = [BuiltInPresets.OptimizeId, "vid-mp4", "vid-mp4-720", "vid-webm", "vid-gif", "aud-mp3-320", "vid-mov", "vid-mkv", "aud-m4a"],
+        [MediaKind.Document] = [BuiltInPresets.OptimizeId, "doc-pdf", "doc-docx", "doc-html", "doc-txt", "doc-md", "doc-odt", "doc-rtf", "doc-epub"],
     };
 
     /// <summary>
@@ -39,6 +39,9 @@ public static class ConversionWheel
     /// </summary>
     public static (string Title, string? Detail) Label(Preset preset)
     {
+        if (preset.IsOptimize)
+            return ("Optimize", "Same format");
+
         var extension = FormatCatalog.NormalizeExtension(preset.TargetExtension);
         var title = extension.ToUpperInvariant();
         var parts = preset.Name.Split(" – ", 2, StringSplitOptions.TrimEntries);

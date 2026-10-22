@@ -19,7 +19,15 @@ public sealed class ImageConverter : IConverter
         ["tif"] = MagickFormat.Tiff,
         ["tiff"] = MagickFormat.Tiff,
         ["ico"] = MagickFormat.Ico,
+        // Output only: reading PDFs needs Ghostscript, which ImageMagick doesn't bundle.
+        ["pdf"] = MagickFormat.Pdf,
     };
+
+    /// <summary>Longest side of a PDF page made from an image, in inches (A4's height).</summary>
+    private const double MaxPageInches = 11.69;
+
+    /// <summary>Sources whose pixels are already lossy, so a JPEG-compressed PDF page loses nothing visible.</summary>
+    private static readonly HashSet<string> PhotoSources = ["jpg", "jpeg", "webp", "avif", "heic", "heif"];
 
     private static readonly HashSet<MagickFormat> Readable = SupportedWhere(f => f.SupportsReading);
     private static readonly HashSet<MagickFormat> Writable = SupportedWhere(f => f.SupportsWriting);
@@ -28,7 +36,7 @@ public sealed class ImageConverter : IConverter
     public ExternalTool? RequiredTool => null;
 
     public bool Supports(string sourceExtension, string targetExtension) =>
-        Formats.TryGetValue(sourceExtension, out var from) && Readable.Contains(from)
+        sourceExtension != "pdf" && Formats.TryGetValue(sourceExtension, out var from) && Readable.Contains(from)
         && Formats.TryGetValue(targetExtension, out var to) && Writable.Contains(to);
 
     public Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken) =>
@@ -38,7 +46,9 @@ public sealed class ImageConverter : IConverter
             var format = Formats[request.TargetExtension];
             try
             {
-                if (IsAnimatable(request.SourceExtension) && IsAnimatable(request.TargetExtension))
+                if (format == MagickFormat.Pdf)
+                    ConvertToPdf(request);
+                else if (IsAnimatable(request.SourceExtension) && IsAnimatable(request.TargetExtension))
                     ConvertAnimated(request, format);
                 else
                     ConvertStill(request, format);
@@ -67,6 +77,48 @@ public sealed class ImageConverter : IConverter
         if (format == MagickFormat.Gif)
             frames.Optimize();
         frames.Write(request.OutputPath, format);
+    }
+
+    /// <summary>One page per image; a multi-page TIFF becomes a multi-page PDF.</summary>
+    private static void ConvertToPdf(ConversionRequest request)
+    {
+        using var pages = new MagickImageCollection();
+        if (request.SourceExtension is "tif" or "tiff")
+            pages.Read(request.InputPath);
+        else
+            pages.Add(new MagickImage(request.InputPath));
+
+        foreach (var page in pages)
+        {
+            page.AutoOrient();
+            Prepare(page, request.Preset, MagickFormat.Pdf);
+            FitPage(page);
+            if (PhotoSources.Contains(request.SourceExtension))
+            {
+                page.Settings.Compression = CompressionMethod.JPEG;
+                page.Quality = (uint)Math.Clamp(request.Preset.Quality ?? 92, 1, 100);
+            }
+            else
+            {
+                // Screenshots, scans and graphics stay lossless.
+                page.Settings.Compression = CompressionMethod.Zip;
+            }
+        }
+        pages.Write(request.OutputPath, MagickFormat.Pdf);
+    }
+
+    /// <summary>
+    /// Page size comes from the image's resolution. Keep it when the page fits on A4; otherwise (including the
+    /// 72 dpi assumed for images without one, which turns a phone photo into a 56-inch page) scale it down to fit.
+    /// </summary>
+    private static void FitPage(IMagickImage<byte> page)
+    {
+        var density = page.Density.Units == DensityUnit.PixelsPerCentimeter
+            ? page.Density.X * 2.54
+            : page.Density.X > 0 ? page.Density.X : 72;
+        var fitting = Math.Max(page.Width, page.Height) / MaxPageInches;
+        var dpi = Math.Max(density, fitting);
+        page.Density = new Density(dpi, dpi, DensityUnit.PixelsPerInch);
     }
 
     private static void Prepare(IMagickImage<byte> image, Preset preset, MagickFormat format)

@@ -33,6 +33,14 @@ public class ConversionWheelTests
     }
 
     [Fact]
+    public void OptimizeLeadsTheWheelWhenAvailable()
+    {
+        IReadOnlyList<Preset> available = [Built("img-png"), Built("img-webp"), Built(BuiltInPresets.OptimizeId)];
+        Assert.Equal([BuiltInPresets.OptimizeId, "img-png", "img-webp"], ConversionWheel.Choose([available], MediaKind.Image).Select(p => p.Id));
+        Assert.Equal(("Optimize", "Same format"), ConversionWheel.Label(Built(BuiltInPresets.OptimizeId)));
+    }
+
+    [Fact]
     public void NothingDraggedMeansNoChoices() => Assert.Empty(ConversionWheel.Choose([], MediaKind.Image));
 
     [Theory]

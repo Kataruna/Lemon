@@ -3,6 +3,9 @@ namespace Lemon.Core.Conversion;
 /// <summary>Picks a converter for each job, reserves the output file and cleans up after failures.</summary>
 public sealed class ConversionService
 {
+    /// <summary>Added to optimized copies: "photo.jpg" becomes "photo (optimized).jpg".</summary>
+    public const string OptimizedSuffix = " (optimized)";
+
     private readonly ToolLocator _tools;
     private readonly Dictionary<ExternalTool, bool> _available = [];
     private readonly Lock _gate = new();
@@ -17,6 +20,9 @@ public sealed class ConversionService
             new MarkdownConverter(),
             new PandocConverter(tools),
             new LibreOfficeConverter(tools),
+            new ImageOptimizeConverter(),
+            new VideoOptimizeConverter(tools),
+            new PdfOptimizeConverter(tools),
         ];
     }
 
@@ -55,12 +61,15 @@ public sealed class ConversionService
         var from = FormatCatalog.NormalizeExtension(sourcePath);
         return Converters
             .Where(c => c.RequiredTool is { } tool && !IsInstalled(tool)
-                        && FormatCatalog.Extensions.Any(to => c.Supports(from, to) && FindConverter(from, to) is null))
+                        && FormatCatalog.Extensions.Append(Preset.SameFormat).Any(to => c.Supports(from, to) && FindConverter(from, to) is null))
             .Select(c => c.RequiredTool!.Value)
             .Distinct();
     }
 
-    /// <summary>Converts one file and returns the path of the result.</summary>
+    /// <summary>
+    /// Converts one file and returns the path of the result. When optimizing doesn't find a smaller version
+    /// worth keeping, nothing is written and <paramref name="inputPath"/> itself is returned.
+    /// </summary>
     public async Task<string> ConvertAsync(
         string inputPath,
         Preset preset,
@@ -71,14 +80,26 @@ public sealed class ConversionService
         if (!File.Exists(inputPath))
             throw new ConversionException("The file no longer exists.");
 
+        var source = FormatCatalog.NormalizeExtension(inputPath);
         var converter = FindConverter(inputPath, preset.TargetExtension)
-            ?? throw new ConversionException($"Can't convert {FormatCatalog.NormalizeExtension(inputPath).ToUpperInvariant()} to {preset.TargetExtension.ToUpperInvariant()}.");
+            ?? throw new ConversionException(preset.IsOptimize
+                ? $"Can't optimize {source.ToUpperInvariant()} files."
+                : $"Can't convert {source.ToUpperInvariant()} to {preset.TargetExtension.ToUpperInvariant()}.");
 
-        var outputPath = OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder);
+        var outputPath = preset.IsOptimize
+            ? OutputPaths.Reserve(inputPath, source, outputFolder, OptimizedSuffix)
+            : OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder);
         try
         {
             await converter.ConvertAsync(new ConversionRequest(inputPath, outputPath, preset), progress, cancellationToken);
-            if (new FileInfo(outputPath).Length == 0)
+            var length = new FileInfo(outputPath).Length;
+            if (preset.IsOptimize && (length == 0 || length >= new FileInfo(inputPath).Length))
+            {
+                // Never hand back a copy that's no smaller; the original already is the best version.
+                TryDelete(outputPath);
+                return inputPath;
+            }
+            if (length == 0)
                 throw new ConversionException($"{converter.Name} produced an empty file.");
             return outputPath;
         }

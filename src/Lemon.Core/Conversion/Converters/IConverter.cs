@@ -3,7 +3,8 @@ namespace Lemon.Core.Conversion.Converters;
 public sealed record ConversionRequest(string InputPath, string OutputPath, Preset Preset)
 {
     public string SourceExtension => FormatCatalog.NormalizeExtension(InputPath);
-    public string TargetExtension => FormatCatalog.NormalizeExtension(Preset.TargetExtension);
+    /// <summary>The output's extension. Optimize keeps the source's.</summary>
+    public string TargetExtension => Preset.IsOptimize ? SourceExtension : FormatCatalog.NormalizeExtension(Preset.TargetExtension);
 }
 
 public interface IConverter
@@ -16,6 +17,9 @@ public interface IConverter
     /// <summary>Whether this converter handles the pair at all, regardless of whether its tool is installed.</summary>
     bool Supports(string sourceExtension, string targetExtension);
 
-    /// <summary>Writes <see cref="ConversionRequest.OutputPath"/>. Progress is reported from 0 to 1 when known.</summary>
+    /// <summary>
+    /// Writes <see cref="ConversionRequest.OutputPath"/>. Progress is reported from 0 to 1 when known.
+    /// When optimizing, leaving the output empty means "no worthwhile smaller version", and the original is kept.
+    /// </summary>
     Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken);
 }

@@ -158,7 +158,8 @@ public sealed partial class PresetsViewModel : ObservableObject
     private void Reload(string? selectId)
     {
         Items.Clear();
-        foreach (var preset in _store.All.OrderBy(p => p.TargetKind).ThenBy(p => p.IsBuiltIn))
+        // Optimize has nothing to tune, so it isn't listed for editing or duplicating.
+        foreach (var preset in _store.All.Where(p => !p.IsOptimize).OrderBy(p => p.TargetKind).ThenBy(p => p.IsBuiltIn))
             Items.Add(preset);
         Selected = Items.FirstOrDefault(p => p.Id == selectId) ?? Items.FirstOrDefault();
     }

@@ -17,6 +17,8 @@ public enum JobStatus
 /// <summary>One file in the queue, its chosen preset and how its conversion is going.</summary>
 public sealed partial class JobViewModel : ObservableObject
 {
+    private readonly long _inputBytes;
+    private long _outputBytes;
     private CancellationTokenSource? _cts;
 
     public JobViewModel(string inputPath, IReadOnlyList<Preset> presets, Preset? preset)
@@ -25,8 +27,8 @@ public sealed partial class JobViewModel : ObservableObject
         Kind = FormatCatalog.KindOf(inputPath) ?? MediaKind.Document;
         AvailablePresets = presets;
         SelectedPreset = preset;
-        var size = File.Exists(inputPath) ? new FileInfo(inputPath).Length : 0;
-        Details = $"{FormatCatalog.NormalizeExtension(inputPath).ToUpperInvariant()} · {FormatSize(size)}";
+        _inputBytes = File.Exists(inputPath) ? new FileInfo(inputPath).Length : 0;
+        Details = $"{FormatCatalog.NormalizeExtension(inputPath).ToUpperInvariant()} · {FormatSize(_inputBytes)}";
     }
 
     public string InputPath { get; }
@@ -82,6 +84,10 @@ public sealed partial class JobViewModel : ObservableObject
     {
         JobStatus.Ready when SelectedPreset is null => "No converter available",
         JobStatus.Queued => "Waiting…",
+        // Optimize hands back the input itself when it couldn't find a worthwhile smaller version.
+        JobStatus.Done when OutputPath == InputPath => "Already optimized",
+        JobStatus.Done when SelectedPreset is { IsOptimize: true } && _inputBytes > 0 =>
+            $"Saved {1 - (double)_outputBytes / _inputBytes:0%} · {FormatSize(_inputBytes)} → {FormatSize(_outputBytes)}",
         JobStatus.Done => $"Saved as {Path.GetFileName(OutputPath)}",
         JobStatus.Failed => Error ?? "Failed",
         JobStatus.Canceled => "Canceled",
@@ -115,7 +121,9 @@ public sealed partial class JobViewModel : ObservableObject
 
         try
         {
-            OutputPath = await Task.Run(() => conversion.ConvertAsync(InputPath, preset, outputFolder, progress, token), token);
+            var output = await Task.Run(() => conversion.ConvertAsync(InputPath, preset, outputFolder, progress, token), token);
+            _outputBytes = new FileInfo(output).Length;
+            OutputPath = output;
             Progress = 1;
             Status = JobStatus.Done;
         }
