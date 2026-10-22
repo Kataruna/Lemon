@@ -11,6 +11,9 @@ public static class BuiltInPresets
         Make(OptimizeId, "Optimize – Balanced", Preset.SameFormat),
         Make("optimize-smaller", "Optimize – Smaller", Preset.SameFormat, p => p with { OptimizeStrength = OptimizeStrength.Smaller }),
 
+        Make("img-nobg", "Remove background – Lite", "png", p => p with { RemoveBackground = BackgroundModel.Lite }),
+        Make("img-nobg-full", "Remove background – Full quality", "png", p => p with { RemoveBackground = BackgroundModel.Full }),
+
         Make("img-png", "PNG", "png"),
         Make("img-jpg", "JPEG – High quality", "jpg", p => p with { Quality = 90 }),
         Make("img-webp", "WebP – Web optimized", "webp", p => p with { Quality = 80, MaxWidth = 1920, MaxHeight = 1920, StripMetadata = true }),

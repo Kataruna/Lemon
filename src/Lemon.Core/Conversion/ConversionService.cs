@@ -16,6 +16,7 @@ public sealed class ConversionService
         Converters =
         [
             new ImageConverter(),
+            new BackgroundRemovalConverter(),
             new FfmpegConverter(tools),
             new MarkdownConverter(),
             new PandocConverter(tools),
@@ -97,7 +98,7 @@ public sealed class ConversionService
 
         var outputPath = preset.IsOptimize
             ? OutputPaths.Reserve(inputPath, source, outputFolder, OptimizedSuffix)
-            : OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder);
+            : OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder, preset.RemoveBackground is null ? null : BackgroundRemovalConverter.Suffix);
         try
         {
             await converter.ConvertAsync(new ConversionRequest(inputPath, outputPath, preset), progress, cancellationToken);

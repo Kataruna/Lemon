@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
@@ -59,7 +59,7 @@ public sealed partial class WheelWindow : Window
     private Task? _loading;
     private IReadOnlyList<Preset> _choices = [];
     /// <summary>The presets for each <see cref="WheelPage"/>, once the dragged files are known.</summary>
-    private IReadOnlyList<Preset>[] _pages = [[], []];
+    private IReadOnlyList<Preset>[] _pages = [[], [], []];
     private WheelPage _page;
     /// <summary>Where the drag was last seen, to re-check what's under it when the ring turns without a mouse move.</summary>
     private Point? _pointer;
@@ -124,7 +124,7 @@ public sealed partial class WheelWindow : Window
         _hover = None;
         _pointer = null;
         _pageTimer.Stop();
-        _pages = [[], []];
+        _pages = [[], [], []];
         _page = WheelPage.Convert;
         SetChoices([]);
         UpdatePageButton();
@@ -160,13 +160,12 @@ public sealed partial class WheelWindow : Window
             HideAfter(TimeSpan.FromMilliseconds(400));
     }
 
-    /// <summary>Switches between the Convert and Optimize rings (there are only two, so any step flips).</summary>
+    /// <summary>Moves to the next (or previous) ring that has something on it, wrapping around.</summary>
     /// <param name="step">+1 for forward (Tab, scroll down, the page button), -1 for back; sets the spin direction.</param>
     public void TurnPage(int step)
     {
         _pageTimer.Stop();
-        var next = _page == WheelPage.Convert ? WheelPage.Optimize : WheelPage.Convert;
-        if (!IsOpen || _closing || _dropped || _pages[(int)next].Count == 0)
+        if (!IsOpen || _closing || _dropped || NextPage(step) is not { } next)
             return;
 
         _page = next;
@@ -175,6 +174,17 @@ public sealed partial class WheelWindow : Window
         UpdatePageButton();
         // The pointer may not move after Tab or a scroll, so work out what's under it on the new ring.
         UpdateHover(_pointer is { } point ? HitTest(point) : None, force: true);
+    }
+
+    private WheelPage? NextPage(int step)
+    {
+        for (var i = 1; i < _pages.Length; i++)
+        {
+            var candidate = (WheelPage)(((int)_page + (step >= 0 ? i : -i) + _pages.Length * 2) % _pages.Length);
+            if (_pages[(int)candidate].Count > 0)
+                return candidate;
+        }
+        return null;
     }
 
     /// <summary>Shrinks the wheel back into its center, then hides the window.</summary>
@@ -246,9 +256,9 @@ public sealed partial class WheelWindow : Window
 
         try
         {
-            _pages = [WheelChoices(_paths, WheelPage.Convert), WheelChoices(_paths, WheelPage.Optimize)];
-            // Files that can only be optimized (e.g. PDFs) open straight on the Optimize ring.
-            _page = _pages[0].Count == 0 && _pages[1].Count > 0 ? WheelPage.Optimize : WheelPage.Convert;
+            _pages = Enum.GetValues<WheelPage>().Select(page => WheelChoices(_paths, page)).ToArray();
+            // Files that can only be optimized (e.g. PDFs) open straight on the first ring that has something.
+            _page = (WheelPage)Math.Max(0, Array.FindIndex(_pages, p => p.Count > 0));
             SetChoices(_pages[(int)_page], animate: true);
             UpdatePageButton();
             SetHub(
@@ -280,8 +290,8 @@ public sealed partial class WheelWindow : Window
         e.DragUIOverride.IsGlyphVisible = false;
         e.DragUIOverride.Caption = hit switch
         {
-            >= 0 when hit < _choices.Count => (_choices[hit].IsOptimize ? "" : "Convert to ") + _choices[hit].Name,
-            PageButtonHit => _page == WheelPage.Convert ? "Hold here for Optimize" : "Hold here for formats",
+            >= 0 when hit < _choices.Count => (ConversionWheel.PageOf(_choices[hit]) == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
+            PageButtonHit when NextPage(1) is { } next => "Hold here for " + PageButtonName(next).ToLowerInvariant(),
             CenterHit when usable => "Add to Lemon",
             _ => "",
         };
@@ -317,7 +327,9 @@ public sealed partial class WheelWindow : Window
             var started = App.Queue.Add(paths, startWith: preset);
             Celebrate(hit);
             var files = started == 1 ? "1 file" : $"{started} files";
-            var text = preset.IsOptimize ? $"Optimizing {files}" : $"Converting {files} to {ConversionWheel.Label(preset).Title}";
+            var text = preset.IsOptimize ? $"Optimizing {files}"
+                : preset.RemoveBackground is not null ? $"Removing background from {files}"
+                : $"Converting {files} to {ConversionWheel.Label(preset).Title}";
             // In a mixed drag, files the format doesn't fit wait in the queue instead.
             if (started < paths.Count(FormatCatalog.IsSupported))
                 text += ", rest queued";
@@ -639,11 +651,18 @@ public sealed partial class WheelWindow : Window
     /// <summary>Shows the button only when the other ring has something on it, labeled with where it goes.</summary>
     private void UpdatePageButton()
     {
-        var other = _page == WheelPage.Convert ? WheelPage.Optimize : WheelPage.Convert;
-        _pageButton.Visibility = _pages[(int)other].Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        _pageButtonText.Text = other == WheelPage.Optimize ? "Optimize" : "Formats";
+        var other = NextPage(1);
+        _pageButton.Visibility = other is null ? Visibility.Collapsed : Visibility.Visible;
+        _pageButtonText.Text = other is { } page ? PageButtonName(page) : "";
         PlaceHubContent();
     }
+
+    private static string PageButtonName(WheelPage page) => page switch
+    {
+        WheelPage.Optimize => "Optimize",
+        WheelPage.RemoveBackground => "Cut out",
+        _ => "Formats",
+    };
 
     private void SetHub(string text, string? icon)
     {

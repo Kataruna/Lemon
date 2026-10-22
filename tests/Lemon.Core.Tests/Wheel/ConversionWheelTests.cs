@@ -44,6 +44,16 @@ public class ConversionWheelTests
     }
 
     [Fact]
+    public void RemoveBackgroundModelsGetTheirOwnRing()
+    {
+        IReadOnlyList<Preset> available = [Built("img-nobg-full"), Built("img-png"), Built("img-nobg"), Built("optimize-smaller")];
+
+        Assert.Equal(["img-png"], ConversionWheel.Choose([available], MediaKind.Image).Select(p => p.Id));
+        Assert.Equal(["img-nobg", "img-nobg-full"],
+            ConversionWheel.Choose([available], MediaKind.Image, WheelPage.RemoveBackground).Select(p => p.Id));
+    }
+
+    [Fact]
     public void OptimizeRingOnlyOffersStrengthsEveryFileSupports()
     {
         // A video can't be optimized losslessly, so a photo + video drag only gets Balanced and Smaller.

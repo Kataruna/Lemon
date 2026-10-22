@@ -1,3 +1,5 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using Lemon.Core.Models;
 using System.Diagnostics;
 using System.Reflection;
 using Microsoft.UI.Xaml;
@@ -12,6 +14,66 @@ public sealed record ToolStatus(ExternalTool Tool, string Title, string Purpose,
     public string Glyph => Found ? "" : "";
     public Brush Brush => (Brush)Application.Current.Resources[Found ? "SystemFillColorSuccessBrush" : "SystemFillColorCautionBrush"];
     public FontFamily DetailFont => new(Found ? "Segoe UI Variable" : "Consolas");
+}
+
+/// <summary>One downloadable background-remover model in Settings.</summary>
+public sealed partial class ModelRow(BackgroundModelInfo info) : ObservableObject
+{
+    private CancellationTokenSource? _cancel;
+
+    public BackgroundModelInfo Info { get; } = info;
+    public string Title => $"{Info.DisplayName} — {Info.Bytes / 1_000_000} MB";
+    public string Purpose => Info.Model == BackgroundModel.Lite
+        ? "Fast, good for most pictures (recommended)."
+        : "Best edges on hair, fur and fine detail. Slower and needs a lot more memory.";
+
+    [ObservableProperty] public partial string Status { get; set; } = "";
+    [ObservableProperty] public partial double Progress { get; set; }
+    [ObservableProperty] public partial bool IsBusy { get; set; }
+    [ObservableProperty] public partial string ButtonText { get; set; } = "";
+
+    public void Refresh()
+    {
+        Status = IsBusy ? "Downloading…" : Info.IsInstalled ? "Downloaded" : "Not downloaded";
+        ButtonText = IsBusy ? "Cancel" : Info.IsInstalled ? "Remove" : "Download";
+    }
+
+    public async Task ToggleAsync()
+    {
+        if (IsBusy)
+        {
+            _cancel?.Cancel();
+            return;
+        }
+        if (Info.IsInstalled)
+        {
+            File.Delete(Info.Path);
+            Refresh();
+            return;
+        }
+
+        _cancel = new CancellationTokenSource();
+        IsBusy = true;
+        Progress = 0;
+        Refresh();
+        try
+        {
+            // The window's dispatcher thread owns Progress, so report through a context-capturing Progress<T>.
+            await Info.DownloadAsync(App.Http, new Progress<double>(p => Progress = p), _cancel.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException)
+        {
+            IsBusy = false;
+            Refresh();
+            Status = "Download failed: " + ex.Message;
+            return;
+        }
+        IsBusy = false;
+        Refresh();
+    }
 }
 
 public sealed partial class SettingsPage : Page
@@ -33,7 +95,16 @@ public sealed partial class SettingsPage : Page
         WheelKeyBox.SelectedItem = App.Settings.WheelKey is { } key && App.WheelKeys.ContainsKey(key) ? key : "Off";
         VersionText.Text = $"Lemon {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)}";
         RefreshTools();
+        ModelList.ItemsSource = BackgroundModelInfo.All.Select(m => new ModelRow(m)).ToList();
+        foreach (ModelRow row in (IEnumerable<ModelRow>)ModelList.ItemsSource)
+            row.Refresh();
         _loading = false;
+    }
+
+    private async void OnModelAction(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is ModelRow row)
+            await row.ToggleAsync();
     }
 
     private void UpdateOutputFolder()

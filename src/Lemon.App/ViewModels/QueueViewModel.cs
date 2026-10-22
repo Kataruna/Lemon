@@ -269,7 +269,7 @@ public sealed partial class QueueViewModel : ObservableObject
 
     private static bool HasOptions(Preset p) =>
         p.Quality is not null || p.MaxWidth is not null || p.MaxHeight is not null || p.AudioBitrateKbps is not null
-        || p.VideoCrf is not null || p.Fps is not null || p.StripMetadata;
+        || p.VideoCrf is not null || p.Fps is not null || p.StripMetadata || p.RemoveBackground is not null;
 
     /// <summary>Replaces folders with the supported files inside them (recursively); files pass through.</summary>
     public static IEnumerable<string> ExpandFolders(IEnumerable<string> paths)

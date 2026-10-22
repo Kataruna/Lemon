@@ -39,6 +39,9 @@ public sealed class ImageConverter : IConverter
         sourceExtension != "pdf" && Formats.TryGetValue(sourceExtension, out var from) && Readable.Contains(from)
         && Formats.TryGetValue(targetExtension, out var to) && Writable.Contains(to);
 
+    // Remove background presets belong to BackgroundRemovalConverter.
+    public bool Supports(string sourceExtension, Preset preset) => preset.RemoveBackground is null;
+
     public Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken) =>
         Task.Run(() =>
         {

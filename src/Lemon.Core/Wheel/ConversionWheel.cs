@@ -1,10 +1,11 @@
 namespace Lemon.Core.Wheel;
 
-/// <summary>The wheel's two rings: formats to convert to, and Optimize strengths.</summary>
+/// <summary>The wheel's rings: formats to convert to, Optimize strengths, and Remove background models.</summary>
 public enum WheelPage
 {
     Convert,
     Optimize,
+    RemoveBackground,
 }
 
 /// <summary>Decides which presets appear on the conversion wheel for a set of dragged files.</summary>
@@ -24,6 +25,12 @@ public static class ConversionWheel
     /// <summary>Optimize strengths go around their ring from gentlest to strongest.</summary>
     private static readonly string[] OptimizeOrder = ["optimize-lossless", BuiltInPresets.OptimizeId, "optimize-smaller"];
 
+    private static readonly string[] RemoveBackgroundOrder = ["img-nobg", "img-nobg-full"];
+
+    /// <summary>The ring a preset belongs on.</summary>
+    public static WheelPage PageOf(Preset preset) =>
+        preset.IsOptimize ? WheelPage.Optimize : preset.RemoveBackground is not null ? WheelPage.RemoveBackground : WheelPage.Convert;
+
     /// <summary>
     /// Picks up to <see cref="MaxChoices"/> presets that work for every dragged file: the user's own presets
     /// first, then the favorites for <paramref name="kind"/>, then anything else that fits.
@@ -37,9 +44,14 @@ public static class ConversionWheel
         if (availablePerFileType.Count == 0)
             return [];
 
-        var favorites = page == WheelPage.Optimize ? OptimizeOrder : Favorites[kind];
+        var favorites = page switch
+        {
+            WheelPage.Optimize => OptimizeOrder,
+            WheelPage.RemoveBackground => RemoveBackgroundOrder,
+            _ => Favorites[kind],
+        };
         return availablePerFileType[0]
-            .Where(p => p.IsOptimize == (page == WheelPage.Optimize))
+            .Where(p => PageOf(p) == page)
             .Where(p => availablePerFileType.Skip(1).All(list => list.Any(q => q.Id == p.Id)))
             .OrderBy(p => p.IsBuiltIn)
             .ThenBy(p => Array.IndexOf(favorites, p.Id) is var i and >= 0 ? i : int.MaxValue)
@@ -74,6 +86,9 @@ public static class ConversionWheel
                 _ => ("Balanced", "Looks the same"),
             };
         }
+
+        if (preset.RemoveBackground is { } model)
+            return model == BackgroundModel.Lite ? ("Lite", "Remove background") : ("Full", "Best quality");
 
         var extension = FormatCatalog.NormalizeExtension(preset.TargetExtension);
         var title = extension.ToUpperInvariant();

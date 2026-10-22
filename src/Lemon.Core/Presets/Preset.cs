@@ -39,6 +39,9 @@ public sealed record Preset
     public int? Fps { get; init; }
     public bool StripMetadata { get; init; }
 
+    /// <summary>Set for Remove background presets (which write PNG): the AI model that cuts the subject out.</summary>
+    public BackgroundModel? RemoveBackground { get; init; }
+
     /// <summary>Only for Optimize presets.</summary>
     public OptimizeStrength OptimizeStrength { get; init; } = OptimizeStrength.Balanced;
 

@@ -13,6 +13,7 @@ public partial class App : Application
     public static AppSettings Settings { get; } = AppSettings.Load();
     public static PresetStore Presets { get; } = new();
     public static ConversionService Conversion { get; } = new(new ToolLocator(tool => Settings.ToolPaths.GetValueOrDefault(tool)));
+    public static HttpClient Http { get; } = new();
     public static QueueViewModel Queue { get; private set; } = null!;
     public static MainWindow? Window { get; private set; }
     public static WheelWindow? Wheel { get; private set; }

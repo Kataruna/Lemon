@@ -1,3 +1,4 @@
+global using Lemon.Core.Models;
 global using Lemon.Core.Configuration;
 global using Lemon.Core.Conversion.Converters;
 global using Lemon.Core.Conversion;
