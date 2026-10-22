@@ -23,6 +23,7 @@ internal sealed class DragGestureMonitor : IDisposable
     private bool _buttonDown;
     private bool _firedThisDrag;
     private bool _swallowingKey;
+    private bool _swallowingTab;
 
     public DragGestureMonitor()
     {
@@ -39,6 +40,18 @@ internal sealed class DragGestureMonitor : IDisposable
 
     /// <summary>Esc was pressed (it also cancels the drag in the source app). Raised on the hook thread.</summary>
     public event Action? EscapePressed;
+
+    /// <summary>
+    /// Tab (Shift+Tab goes back) or the mouse wheel asked for the wheel's next (+1) or previous (-1) page.
+    /// Raised on the hook thread.
+    /// </summary>
+    public event Action<int>? PageRequested;
+
+    /// <summary>
+    /// Whether the conversion wheel is up. Tab and scrolling are only taken over while it is and a drag is going on,
+    /// so they work normally everywhere else. Called on the hook thread, so it must be quick.
+    /// </summary>
+    public Func<bool>? IsWheelOpen { get; set; }
 
     public bool ShakeEnabled { get; set; } = true;
 
@@ -104,6 +117,10 @@ internal sealed class DragGestureMonitor : IDisposable
                     }
                     break;
 
+                case Native.WM_MOUSEWHEEL when IsWheelOpen?.Invoke() == true && IsLeftButtonDown():
+                    // The high word of mouseData is the signed wheel delta; scrolling down goes forward.
+                    PageRequested?.Invoke((short)(info.MouseData >> 16) > 0 ? -1 : 1);
+                    return 1;
                 case Native.WM_MOUSEMOVE when _buttonDown && !_firedThisDrag && ShakeEnabled:
                     // Only look at what's being dragged once the cheap shake check passes.
                     if (_shake.Add(info.Point.X, info.Point.Y, info.Time) && Native.IsDragDropInProgress())
@@ -125,6 +142,23 @@ internal sealed class DragGestureMonitor : IDisposable
 
             if (isDown && info.VirtualKey == Native.VK_ESCAPE)
                 EscapePressed?.Invoke();
+
+            if (info.VirtualKey == Native.VK_TAB)
+            {
+                if (isDown && (_swallowingTab || IsWheelOpen?.Invoke() == true && IsLeftButtonDown()))
+                {
+                    // Turn once per press; auto-repeats while it's held are swallowed too.
+                    if (!_swallowingTab)
+                        PageRequested?.Invoke((Native.GetAsyncKeyState(Native.VK_SHIFT) & 0x8000) != 0 ? -1 : 1);
+                    _swallowingTab = true;
+                    return 1;
+                }
+                if (isUp && _swallowingTab)
+                {
+                    _swallowingTab = false;
+                    return 1;
+                }
+            }
 
             if (WheelKey != 0 && info.VirtualKey == WheelKey)
             {

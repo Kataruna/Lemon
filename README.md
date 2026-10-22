@@ -6,7 +6,7 @@ A drag-and-drop file converter for Windows 11. Drop in images, audio, video or d
 
 - **Conversion wheel.** While you drag files anywhere in Windows (Explorer, the desktop, a browser…), shake the mouse or press **Space** and a wheel of formats pops up under the pointer. Drop on a format to convert right away, next to the originals, or drop on the lemon in the middle to add the files to the queue. The key is only intercepted during an actual drag-and-drop. Lemon must be running (minimized is fine). Shake and key are configurable in Settings.
 - **Batch queue.** Drag files or whole folders onto the window. Every file gets its own preset, and *Set all to* changes every file of one type at once. Files convert in parallel with live progress and can be cancelled or retried.
-- **Optimize.** Like Clop on macOS: pick *Optimize* (in a file's preset list, *Optimize all*, the wheel or the right-click menu) to make images, videos and PDFs smaller in the same format, with the quality kept close to the original. The optimized copy is saved as `name (optimized).ext` next to the original. If Lemon can't find a version that's clearly smaller, it keeps the original and says "Already optimized". See [How Optimize works](#how-optimize-works).
+- **Optimize.** Like Clop on macOS: pick *Optimize* (in a file's preset list, *Optimize all*, the wheel or the right-click menu) to make images, videos and PDFs smaller in the same format, with the quality kept close to the original. There are three strengths: *Lossless* (same pixels, images only), *Balanced* (looks the same; the default) and *Smaller* (slightly lower quality, like Clop's aggressive mode). On the wheel they have their own ring: rest the dragged files on the small *Optimize* button in the middle, or press **Tab** or scroll the mouse wheel to switch rings (Shift+Tab or scrolling up goes back). The optimized copy is saved as `name (optimized).ext` next to the original. If Lemon can't find a version that's clearly smaller, it keeps the original and says "Already optimized". See [How Optimize works](#how-optimize-works).
 - **Presets.** Built-in presets such as "WebP – Web optimized", "MP3 – 320 kbps", "MP4 – 720p small" and "Animated GIF". You can duplicate any of them and change quality, max size, bitrate, video CRF, frame rate and metadata stripping.
 - **Right-click menu.** *Convert with Lemon › Open in Lemon… / To PNG / To MP3 / …* in File Explorer. Turn it on in Settings. Selecting many files sends them all to one window.
 - **Safe output.** The original is never overwritten. If the target name is taken, Lemon saves `name (1).ext`, and it deletes partial files when a conversion fails or is cancelled. Closing the window mid-batch asks first. Converter processes are tied to Lemon with a job object, so they never outlive it, even after a crash. A forcibly killed Lemon can still leave a partial file behind.
@@ -38,13 +38,15 @@ Ghostscript isn't on winget. Get the Windows installer from [ghostscript.com](ht
 
 ## How Optimize works
 
-- **JPEG.** Lossless first: progressive encoding with optimized Huffman tables. If the file was saved above quality 85, Lemon also tries a quality-85 encode.
+The numbers below are for *Balanced*; *Smaller* values follow in brackets. *Lossless* only does the lossless steps, so it's offered for JPEG, PNG and GIF but not for WebP, video or PDF.
+
+- **JPEG.** Lossless first: progressive encoding with optimized Huffman tables. If the file was saved above quality 85 [75], Lemon also tries a quality-85 [75] encode.
 - **PNG.** Lossless recompression first. If the image has more than 256 colors, Lemon also tries a 256-color palette with alpha kept, like pngquant.
-- **WebP.** Lemon tries a quality-80 encode.
+- **WebP.** Lemon tries a quality-80 [70] encode.
 - **GIF.** Lossless recompression only, and every frame is kept. Animated WebP and animated PNG are left alone.
-- **Lossy versions.** A lossy version is only used when it saves at least 10% more than the lossless one and passes a structural-similarity check (DSSIM ≤ 0.01) against the original, so it looks the same.
-- **Video.** The picture is re-encoded as H.264 (CRF 23, `slow`) and the audio is copied untouched. MKV subtitles and attachments are kept. HEVC, AV1 and VP9 videos, and anything that is HDR or not 8-bit 4:2:0, are left alone: H.264 wouldn't make them smaller, or it would quietly lose color. A new video is only kept if it's at least 10% smaller.
-- **PDF.** Ghostscript subsets and compresses fonts, merges duplicate images and downsamples images above 300 dpi to 200 dpi. Text and vector graphics stay sharp. A new PDF is only kept if it's at least 10% smaller. Ghostscript rewrites the whole file, so digital signatures stop validating and accessibility tags are lost. Don't optimize signed or tagged PDFs.
+- **Lossy versions.** A lossy version is only used when it saves at least 10% more than the lossless one and passes a structural-similarity check against the original: DSSIM ≤ 0.01 (looks the same) [≤ 0.025].
+- **Video.** The picture is re-encoded as H.264 (CRF 23 [28], `slow`) and the audio is copied untouched. MKV subtitles and attachments are kept. HEVC, AV1 and VP9 videos, and anything that is HDR or not 8-bit 4:2:0, are left alone: H.264 wouldn't make them smaller, or it would quietly lose color. A new video is only kept if it's at least 10% smaller.
+- **PDF.** Ghostscript subsets and compresses fonts, merges duplicate images and downsamples images above 300 dpi to 200 dpi [above 225 dpi to 150 dpi, with stronger JPEG]. Text and vector graphics stay sharp. A new PDF is only kept if it's at least 10% smaller. Ghostscript rewrites the whole file, so digital signatures stop validating and accessibility tags are lost. Don't optimize signed or tagged PDFs.
 - **Audio** isn't optimized. Re-encoding lossy audio only loses quality.
 
 ## Build and run

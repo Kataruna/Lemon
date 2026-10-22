@@ -137,6 +137,8 @@ public partial class App : Application
         gestures.Triggered += (x, y) => wheel.DispatcherQueue.TryEnqueue(() => wheel.ShowAt(x, y));
         gestures.ButtonReleased += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnDragEnded);
         gestures.EscapePressed += () => wheel.DispatcherQueue.TryEnqueue(wheel.Hide);
+        gestures.PageRequested += step => wheel.DispatcherQueue.TryEnqueue(() => wheel.TurnPage(step));
+        gestures.IsWheelOpen = () => wheel.IsOpen;
 
         Wheel = wheel;
         _gestures = gestures;

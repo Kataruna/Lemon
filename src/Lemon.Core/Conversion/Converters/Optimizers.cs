@@ -5,25 +5,34 @@ using ImageMagick.ImageOptimizers;
 namespace Lemon.Core.Conversion.Converters;
 
 /// <summary>
-/// Optimize mode for images, in the spirit of Clop: a lossless recompression first, then a lighter lossy encode
-/// that is only kept when it looks the same as the original and saves noticeably more.
+/// Optimize mode for images, in the spirit of Clop: a lossless recompression first, then (unless the strength is
+/// Lossless) a lighter lossy encode that is only kept when it still looks like the original and saves noticeably more.
 /// </summary>
 public sealed class ImageOptimizeConverter : IConverter
 {
-    /// <summary>
+    /// <param name="MaxDissimilarity">
     /// The most structural dissimilarity (0 = identical) a lossy version may have. Re-encoding real photos as
-    /// quality-85 JPEG scores about 0.003-0.008; squeezing a photo into 256 colors scores about 0.05.
-    /// </summary>
-    private const double MaxDissimilarity = 0.01;
+    /// quality-85 JPEG scores about 0.003-0.008, quality 75 about 0.005-0.015; squeezing a photo into 256 colors
+    /// scores about 0.05.
+    /// </param>
+    private sealed record LossySettings(uint JpegQuality, uint WebPQuality, double MaxDissimilarity);
 
-    private const uint JpegQuality = 85;
-    private const uint WebPQuality = 80;
+    private static LossySettings? LossyFor(OptimizeStrength strength) => strength switch
+    {
+        OptimizeStrength.Lossless => null,
+        OptimizeStrength.Smaller => new(JpegQuality: 75, WebPQuality: 70, MaxDissimilarity: 0.025),
+        _ => new(JpegQuality: 85, WebPQuality: 80, MaxDissimilarity: 0.01),
+    };
 
     public string Name => "ImageMagick";
     public ExternalTool? RequiredTool => null;
 
     public bool Supports(string sourceExtension, string targetExtension) =>
         targetExtension == Preset.SameFormat && sourceExtension is "jpg" or "jpeg" or "png" or "gif" or "webp";
+
+    // WebP has no lossless recompression to offer.
+    public bool Supports(string sourceExtension, Preset preset) =>
+        !(sourceExtension == "webp" && preset.OptimizeStrength == OptimizeStrength.Lossless);
 
     public Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken) =>
         Task.Run(() =>
@@ -32,12 +41,13 @@ public sealed class ImageOptimizeConverter : IConverter
             try
             {
                 var bytes = File.ReadAllBytes(request.InputPath);
+                var lossy = LossyFor(request.Preset.OptimizeStrength);
                 var best = request.SourceExtension switch
                 {
-                    "png" => OptimizePng(bytes, cancellationToken),
+                    "png" => OptimizePng(bytes, lossy, cancellationToken),
                     "gif" => Lossless(bytes, new GifOptimizer()),
-                    "webp" => OptimizeWebP(bytes),
-                    _ => OptimizeJpeg(bytes, cancellationToken),
+                    "webp" => lossy is null ? null : OptimizeWebP(bytes, lossy),
+                    _ => OptimizeJpeg(bytes, lossy, cancellationToken),
                 };
                 if (best is not null)
                     File.WriteAllBytes(request.OutputPath, best);
@@ -49,26 +59,28 @@ public sealed class ImageOptimizeConverter : IConverter
             progress?.Report(1);
         }, cancellationToken);
 
-    private static byte[] OptimizeJpeg(byte[] bytes, CancellationToken cancellationToken)
+    private static byte[] OptimizeJpeg(byte[] bytes, LossySettings? settings, CancellationToken cancellationToken)
     {
         // Progressive with optimized Huffman tables: the same pixels in fewer bytes.
         var optimizer = new JpegOptimizer { OptimalCompression = true, Progressive = true };
         var lossless = Lossless(bytes, optimizer);
         cancellationToken.ThrowIfCancellationRequested();
+        if (settings is null)
+            return lossless;
 
         // EXIF orientation is left as a tag (no AutoOrient) so the versions compare pixel for pixel.
         using var original = new MagickImage(bytes);
         // Only files saved at a higher quality than ours are re-encoded; going lower again just stacks up artifacts.
-        if (original.Quality <= JpegQuality)
+        if (original.Quality <= settings.JpegQuality)
             return lossless;
 
         using var lossy = original.Clone();
-        lossy.Quality = JpegQuality;
+        lossy.Quality = settings.JpegQuality;
         var candidate = Lossless(lossy.ToByteArray(MagickFormat.Jpeg), optimizer);
-        return Pick(lossless, LooksSame(original, candidate), bytes.Length)!;
+        return Pick(lossless, LooksSame(original, candidate, settings), bytes.Length)!;
     }
 
-    private static byte[]? OptimizePng(byte[] bytes, CancellationToken cancellationToken)
+    private static byte[]? OptimizePng(byte[] bytes, LossySettings? settings, CancellationToken cancellationToken)
     {
         // ImageMagick would keep only the first frame of an animated PNG, and the bundled 8-bit build can't
         // round-trip 16 bits per channel.
@@ -78,6 +90,8 @@ public sealed class ImageOptimizeConverter : IConverter
         var optimizer = new PngOptimizer { OptimalCompression = true };
         var lossless = Lossless(bytes, optimizer);
         cancellationToken.ThrowIfCancellationRequested();
+        if (settings is null)
+            return lossless;
 
         using var original = new MagickImage(bytes);
         if (original.TotalColors <= 256)
@@ -89,10 +103,10 @@ public sealed class ImageOptimizeConverter : IConverter
         reduced.Quantize(new QuantizeSettings { Colors = 256, DitherMethod = DitherMethod.No });
         var candidate = Lossless(reduced.ToByteArray(MagickFormat.Png), optimizer);
         cancellationToken.ThrowIfCancellationRequested();
-        return Pick(lossless, LooksSame(original, candidate), bytes.Length);
+        return Pick(lossless, LooksSame(original, candidate, settings), bytes.Length);
     }
 
-    private static byte[]? OptimizeWebP(byte[] bytes)
+    private static byte[]? OptimizeWebP(byte[] bytes, LossySettings settings)
     {
         using var frames = new MagickImageCollection(bytes);
         // MagickImage would flatten an animation to its first frame; leave animations as they are.
@@ -101,8 +115,8 @@ public sealed class ImageOptimizeConverter : IConverter
 
         var original = frames[0];
         using var lossy = original.Clone();
-        lossy.Quality = WebPQuality;
-        return Pick(null, LooksSame(original, lossy.ToByteArray(MagickFormat.WebP)), bytes.Length);
+        lossy.Quality = settings.WebPQuality;
+        return Pick(null, LooksSame(original, lossy.ToByteArray(MagickFormat.WebP), settings), bytes.Length);
     }
 
     /// <summary>The lossy version when it saves enough over the lossless one (or the original), else the lossless one.</summary>
@@ -112,13 +126,13 @@ public sealed class ImageOptimizeConverter : IConverter
         return lossy is not null && lossy.Length <= baseline * (1 - OptimizedOutput.MinLossySaving) ? lossy : lossless;
     }
 
-    /// <summary>The candidate if it's visually the same as the original, otherwise null.</summary>
-    private static byte[]? LooksSame(IMagickImage<byte> original, byte[] candidate)
+    /// <summary>The candidate if it's close enough to the original for these settings, otherwise null.</summary>
+    private static byte[]? LooksSame(IMagickImage<byte> original, byte[] candidate, LossySettings settings)
     {
         using var decoded = new MagickImage(candidate);
         if (decoded.Width != original.Width || decoded.Height != original.Height)
             return null;
-        return Dissimilarity(original, decoded) <= MaxDissimilarity ? candidate : null;
+        return Dissimilarity(original, decoded) <= settings.MaxDissimilarity ? candidate : null;
     }
 
     /// <summary>
@@ -177,14 +191,12 @@ public sealed class ImageOptimizeConverter : IConverter
 }
 
 /// <summary>
-/// Optimize mode for video: re-encodes the picture as H.264 at a visually transparent quality and copies the
-/// audio untouched. Videos that are already efficient (HEVC, AV1, VP9), HDR or more than 8-bit 4:2:0 are left alone,
+/// Optimize mode for video: re-encodes the picture as H.264 (CRF 23 for Balanced, which looks the same; CRF 28 for
+/// Smaller) and copies the audio untouched. There's no lossless option: any re-encode changes pixels. Videos that are already efficient (HEVC, AV1, VP9), HDR or more than 8-bit 4:2:0 are left alone,
 /// because H.264 would either not beat them or quietly lose color.
 /// </summary>
 public sealed class VideoOptimizeConverter(ToolLocator tools) : IConverter
 {
-    private const int Crf = 23;
-
     private static readonly HashSet<string> Containers = ["mp4", "m4v", "mov", "mkv"];
     private static readonly HashSet<string> EfficientCodecs = ["hevc", "av1", "vp9"];
 
@@ -193,6 +205,8 @@ public sealed class VideoOptimizeConverter(ToolLocator tools) : IConverter
 
     public bool Supports(string sourceExtension, string targetExtension) =>
         targetExtension == Preset.SameFormat && Containers.Contains(sourceExtension);
+
+    public bool Supports(string sourceExtension, Preset preset) => preset.OptimizeStrength != OptimizeStrength.Lossless;
 
     public async Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken)
     {
@@ -228,6 +242,7 @@ public sealed class VideoOptimizeConverter(ToolLocator tools) : IConverter
 
     public static List<string> BuildArguments(ConversionRequest request)
     {
+        var crf = request.Preset.OptimizeStrength == OptimizeStrength.Smaller ? "28" : "23";
         var args = new List<string>
         {
             "-hide_banner", "-nostdin", "-y", "-i", request.InputPath,
@@ -235,7 +250,7 @@ public sealed class VideoOptimizeConverter(ToolLocator tools) : IConverter
             "-map", "0:v:0", "-map", "0:a?", "-map", "0:s?",
             // H.264 in 4:2:0 needs even dimensions; odd ones are scaled to the next even size down.
             "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-pix_fmt", "yuv420p",
-            "-c:v", "libx264", "-crf", Crf.ToString(CultureInfo.InvariantCulture), "-preset", "slow",
+            "-c:v", "libx264", "-crf", crf, "-preset", "slow",
             "-c:a", "copy", "-c:s", "copy",
         };
         // Same container in and out, so every track can be copied as is. MKV may also carry fonts for its subtitles.
@@ -274,7 +289,8 @@ public sealed class VideoOptimizeConverter(ToolLocator tools) : IConverter
 
 /// <summary>
 /// Optimize mode for PDF via Ghostscript: fonts are subset and compressed, duplicate images merged, and images well
-/// above 200 dpi are downsampled with high-quality JPEG. Text and vector graphics stay sharp.
+/// above 200 dpi (150 dpi for Smaller) are downsampled. Text and vector graphics stay sharp. There's no lossless
+/// option: Ghostscript rewrites every page.
 /// </summary>
 public sealed class PdfOptimizeConverter(ToolLocator tools) : IConverter
 {
@@ -283,6 +299,8 @@ public sealed class PdfOptimizeConverter(ToolLocator tools) : IConverter
 
     public bool Supports(string sourceExtension, string targetExtension) =>
         targetExtension == Preset.SameFormat && sourceExtension == "pdf";
+
+    public bool Supports(string sourceExtension, Preset preset) => preset.OptimizeStrength != OptimizeStrength.Lossless;
 
     public async Task ConvertAsync(ConversionRequest request, IProgress<double>? progress, CancellationToken cancellationToken)
     {
@@ -294,19 +312,25 @@ public sealed class PdfOptimizeConverter(ToolLocator tools) : IConverter
         progress?.Report(1);
     }
 
-    public static List<string> BuildArguments(ConversionRequest request) =>
-    [
-        "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
-        "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7",
-        // The /printer profile keeps JPEG quality high; the resolutions below only touch images over 300 dpi.
-        "-dPDFSETTINGS=/printer",
-        "-dDownsampleColorImages=true", "-dColorImageResolution=200", "-dColorImageDownsampleThreshold=1.5",
-        "-dDownsampleGrayImages=true", "-dGrayImageResolution=200", "-dGrayImageDownsampleThreshold=1.5",
-        "-dDetectDuplicateImages=true", "-dCompressFonts=true", "-dSubsetFonts=true",
-        // Ghostscript reads % in the output name as a page-number placeholder.
-        "-sOutputFile=" + request.OutputPath.Replace("%", "%%"),
-        request.InputPath,
-    ];
+    public static List<string> BuildArguments(ConversionRequest request)
+    {
+        // Balanced: /printer keeps JPEG quality high and only images over 300 dpi are touched.
+        // Smaller: /ebook's stronger JPEG, and images over 225 dpi come down to 150.
+        var smaller = request.Preset.OptimizeStrength == OptimizeStrength.Smaller;
+        var dpi = smaller ? "150" : "200";
+        return
+        [
+            "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+            "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7",
+            smaller ? "-dPDFSETTINGS=/ebook" : "-dPDFSETTINGS=/printer",
+            "-dDownsampleColorImages=true", "-dColorImageResolution=" + dpi, "-dColorImageDownsampleThreshold=1.5",
+            "-dDownsampleGrayImages=true", "-dGrayImageResolution=" + dpi, "-dGrayImageDownsampleThreshold=1.5",
+            "-dDetectDuplicateImages=true", "-dCompressFonts=true", "-dSubsetFonts=true",
+            // Ghostscript reads % in the output name as a page-number placeholder.
+            "-sOutputFile=" + request.OutputPath.Replace("%", "%%"),
+            request.InputPath,
+        ];
+    }
 }
 
 internal static class OptimizedOutput

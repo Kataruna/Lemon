@@ -53,7 +53,16 @@ public sealed class ConversionService
         return Converters.FirstOrDefault(c => c.Supports(from, to) && (c.RequiredTool is not { } tool || IsInstalled(tool)));
     }
 
-    public bool CanConvert(string sourcePath, Preset preset) => FindConverter(sourcePath, preset.TargetExtension) is not null;
+    /// <summary>Like <see cref="FindConverter(string, string)"/>, but also checks the converter can honor the preset's options.</summary>
+    public IConverter? FindConverter(string sourcePath, Preset preset)
+    {
+        var from = FormatCatalog.NormalizeExtension(sourcePath);
+        var to = FormatCatalog.NormalizeExtension(preset.TargetExtension);
+        return Converters.FirstOrDefault(c => c.Supports(from, to) && c.Supports(from, preset)
+                                              && (c.RequiredTool is not { } tool || IsInstalled(tool)));
+    }
+
+    public bool CanConvert(string sourcePath, Preset preset) => FindConverter(sourcePath, preset) is not null;
 
     /// <summary>Tools that aren't installed but would unlock more targets for this kind of file.</summary>
     public IEnumerable<ExternalTool> MissingToolsFor(string sourcePath)
@@ -81,7 +90,7 @@ public sealed class ConversionService
             throw new ConversionException("The file no longer exists.");
 
         var source = FormatCatalog.NormalizeExtension(inputPath);
-        var converter = FindConverter(inputPath, preset.TargetExtension)
+        var converter = FindConverter(inputPath, preset)
             ?? throw new ConversionException(preset.IsOptimize
                 ? $"Can't optimize {source.ToUpperInvariant()} files."
                 : $"Can't convert {source.ToUpperInvariant()} to {preset.TargetExtension.ToUpperInvariant()}.");

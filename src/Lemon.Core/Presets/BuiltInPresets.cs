@@ -2,11 +2,14 @@ namespace Lemon.Core.Presets;
 
 public static class BuiltInPresets
 {
+    /// <summary>The Balanced Optimize preset, used wherever Optimize is picked without choosing a strength.</summary>
     public const string OptimizeId = "optimize";
 
     public static IReadOnlyList<Preset> All { get; } =
     [
-        Make(OptimizeId, "Optimize – Smaller, same format", Preset.SameFormat),
+        Make("optimize-lossless", "Optimize – Lossless", Preset.SameFormat, p => p with { OptimizeStrength = OptimizeStrength.Lossless }),
+        Make(OptimizeId, "Optimize – Balanced", Preset.SameFormat),
+        Make("optimize-smaller", "Optimize – Smaller", Preset.SameFormat, p => p with { OptimizeStrength = OptimizeStrength.Smaller }),
 
         Make("img-png", "PNG", "png"),
         Make("img-jpg", "JPEG – High quality", "jpg", p => p with { Quality = 90 }),

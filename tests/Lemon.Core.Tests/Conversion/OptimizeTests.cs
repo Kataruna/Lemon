@@ -8,6 +8,8 @@ namespace Lemon.Core.Tests;
 public sealed class OptimizeTests : IDisposable
 {
     private static readonly Preset Optimize = BuiltInPresets.All.Single(p => p.Id == BuiltInPresets.OptimizeId);
+    private static readonly Preset Lossless = BuiltInPresets.All.Single(p => p.Id == "optimize-lossless");
+    private static readonly Preset Smaller = BuiltInPresets.All.Single(p => p.Id == "optimize-smaller");
 
     private readonly TempFolder _temp = new();
     private readonly ToolLocator _tools = new();
@@ -63,6 +65,57 @@ public sealed class OptimizeTests : IDisposable
         Assert.True(new FileInfo(output).Length < new FileInfo(source).Length * 0.9);
         Assert.True(Dissimilarity(source, output) <= 0.01);
         Assert.True(File.Exists(source));
+    }
+
+    [Fact]
+    public async Task LosslessKeepsEveryPixel()
+    {
+        var source = MakePhoto();
+
+        var output = await _service.ConvertAsync(source, Lossless, null);
+
+        Assert.NotEqual(source, output);
+        Assert.True(new FileInfo(output).Length < new FileInfo(source).Length);
+        using var before = new MagickImage(source);
+        using var after = new MagickImage(output);
+        Assert.Equal(0, before.Compare(after, ErrorMetric.Absolute));
+    }
+
+    [Fact]
+    public async Task SmallerBeatsBalancedAndStillLooksClose()
+    {
+        var source = MakePhoto();
+
+        var balanced = await _service.ConvertAsync(source, Optimize, _temp.File("balanced"));
+        var smaller = await _service.ConvertAsync(source, Smaller, _temp.File("smaller"));
+
+        Assert.True(new FileInfo(smaller).Length < new FileInfo(balanced).Length);
+        Assert.True(Dissimilarity(source, smaller) <= 0.025);
+    }
+
+    [Fact]
+    public void LosslessIsOnlyOfferedWhereItCanBeKept()
+    {
+        Assert.True(_service.CanConvert("photo.png", Lossless));
+        Assert.True(_service.CanConvert("photo.jpg", Lossless));
+        // WebP has no lossless recompression, and video or PDF re-encodes always change pixels.
+        Assert.False(_service.CanConvert("photo.webp", Lossless));
+        Assert.False(_service.CanConvert("clip.mp4", Lossless));
+        Assert.False(_service.CanConvert("scan.pdf", Lossless));
+        Assert.True(_service.CanConvert("photo.webp", Smaller));
+    }
+
+    [Fact]
+    public void SmallerVideoAndPdfSqueezeHarder()
+    {
+        var video = VideoOptimizeConverter.BuildArguments(new ConversionRequest("in.mp4", "out.mp4", Smaller));
+        Assert.Equal("28", video[video.IndexOf("-crf") + 1]);
+        var balancedVideo = VideoOptimizeConverter.BuildArguments(new ConversionRequest("in.mp4", "out.mp4", Optimize));
+        Assert.Equal("23", balancedVideo[balancedVideo.IndexOf("-crf") + 1]);
+
+        var pdf = PdfOptimizeConverter.BuildArguments(new ConversionRequest("in.pdf", "out.pdf", Smaller));
+        Assert.Contains("-dPDFSETTINGS=/ebook", pdf);
+        Assert.Contains("-dColorImageResolution=150", pdf);
     }
 
     [Fact]

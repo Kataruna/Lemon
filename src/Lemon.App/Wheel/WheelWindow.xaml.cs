@@ -18,7 +18,8 @@ namespace Lemon.App.Wheel;
 
 /// <summary>
 /// The round format picker that pops up under the cursor mid-drag. Drop files on a slice to convert them
-/// with that preset straight away, or on the middle to just add them to the queue.
+/// with that preset straight away, or on the middle to just add them to the queue. A second ring holds the
+/// Optimize strengths; hover the little button in the hub, press Tab or scroll to switch rings.
 /// </summary>
 public sealed partial class WheelWindow : Window
 {
@@ -30,22 +31,38 @@ public sealed partial class WheelWindow : Window
     private const float PopDistance = 10;
     private const int None = -2;
     private const int CenterHit = -1;
+    private const int PageButtonHit = -3;
+    private const double PageButtonWidth = 86;
+    private const double PageButtonHeight = 22;
+    // Sits in the bottom of the hub, clear of the lemon and the hub text above it.
+    private const double PageButtonTop = Center + InnerRadius - PageButtonHeight - 8;
+    /// <summary>How long the dragged files must rest on the page button before the ring turns.</summary>
+    private static readonly TimeSpan PageButtonDwell = TimeSpan.FromMilliseconds(450);
 
     /// <param name="Outward">Unit vector from the wheel's center through the middle of the slice.</param>
     private sealed record Slice(Path Shape, Path Glow, StackPanel Label, Vector3 Outward);
 
     private readonly List<Slice> _slices = [];
     private readonly DispatcherQueueTimer _hideTimer;
+    private readonly DispatcherQueueTimer _pageTimer;
     private readonly Compositor _compositor;
     private Ellipse _hub = null!;
     private StackPanel _hubContent = null!;
     private TextBlock _hubText = null!;
     private FontIcon _hubIcon = null!;
     private Image _hubImage = null!;
+    private Border _pageButton = null!;
+    private TextBlock _pageButtonText = null!;
+    private FontIcon _pageButtonIcon = null!;
 
     private IReadOnlyList<string>? _paths;
     private Task? _loading;
     private IReadOnlyList<Preset> _choices = [];
+    /// <summary>The presets for each <see cref="WheelPage"/>, once the dragged files are known.</summary>
+    private IReadOnlyList<Preset>[] _pages = [[], []];
+    private WheelPage _page;
+    /// <summary>Where the drag was last seen, to re-check what's under it when the ring turns without a mouse move.</summary>
+    private Point? _pointer;
     private int _hover = None;
     private bool _dropped;
 
@@ -78,6 +95,10 @@ public sealed partial class WheelWindow : Window
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.IsRepeating = false;
         _hideTimer.Tick += (_, _) => Hide();
+        _pageTimer = DispatcherQueue.CreateTimer();
+        _pageTimer.IsRepeating = false;
+        _pageTimer.Interval = PageButtonDwell;
+        _pageTimer.Tick += (_, _) => TurnPage(1);
 
         _compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
         ElementCompositionPreview.GetElementVisual(Ring).CenterPoint = new Vector3((float)Center, (float)Center, 0);
@@ -101,7 +122,12 @@ public sealed partial class WheelWindow : Window
         App.Conversion.RefreshTools();
         _dropped = false;
         _hover = None;
+        _pointer = null;
+        _pageTimer.Stop();
+        _pages = [[], []];
+        _page = WheelPage.Convert;
         SetChoices([]);
+        UpdatePageButton();
         SetHub("Drop on a format", icon: null);
 
         var monitor = Native.MonitorFromPoint(new Native.POINT { X = x, Y = y }, 2 /* MONITOR_DEFAULTTONEAREST */);
@@ -134,12 +160,30 @@ public sealed partial class WheelWindow : Window
             HideAfter(TimeSpan.FromMilliseconds(400));
     }
 
+    /// <summary>Switches between the Convert and Optimize rings (there are only two, so any step flips).</summary>
+    /// <param name="step">+1 for forward (Tab, scroll down, the page button), -1 for back; sets the spin direction.</param>
+    public void TurnPage(int step)
+    {
+        _pageTimer.Stop();
+        var next = _page == WheelPage.Convert ? WheelPage.Optimize : WheelPage.Convert;
+        if (!IsOpen || _closing || _dropped || _pages[(int)next].Count == 0)
+            return;
+
+        _page = next;
+        SetChoices(_pages[(int)_page], animate: true);
+        RotateFrom(Ring, step >= 0 ? -30f : 30f, damping: 0.6f);
+        UpdatePageButton();
+        // The pointer may not move after Tab or a scroll, so work out what's under it on the new ring.
+        UpdateHover(_pointer is { } point ? HitTest(point) : None, force: true);
+    }
+
     /// <summary>Shrinks the wheel back into its center, then hides the window.</summary>
     public void Hide() => Close(then: null);
 
     private void Close(Action? then)
     {
         _hideTimer.Stop();
+        _pageTimer.Stop();
         if (!IsOpen || _closing)
             return;
         _closing = true;
@@ -202,14 +246,17 @@ public sealed partial class WheelWindow : Window
 
         try
         {
-            var choices = WheelChoices(_paths);
-            SetChoices(choices, animate: true);
+            _pages = [WheelChoices(_paths, WheelPage.Convert), WheelChoices(_paths, WheelPage.Optimize)];
+            // Files that can only be optimized (e.g. PDFs) open straight on the Optimize ring.
+            _page = _pages[0].Count == 0 && _pages[1].Count > 0 ? WheelPage.Optimize : WheelPage.Convert;
+            SetChoices(_pages[(int)_page], animate: true);
+            UpdatePageButton();
             SetHub(
                 _paths.Count == 0 ? "Lemon can't convert these"
-                : choices.Count == 0 ? "Mixed file types: add to queue"
+                : _choices.Count == 0 ? "Mixed file types: add to queue"
                 : "Add to queue",
                 icon: null);
-            UpdateHover(_hover, force: true);
+            UpdateHover(_pointer is { } point ? HitTest(point) : _hover, force: true);
         }
         catch (Exception ex)
         {
@@ -225,14 +272,16 @@ public sealed partial class WheelWindow : Window
             return;
         StartLoading(e);
 
-        var hit = HitTest(e.GetPosition(Ring));
+        _pointer = e.GetPosition(Ring);
+        var hit = HitTest(_pointer.Value);
         UpdateHover(hit);
         var usable = _paths is null || _paths.Count > 0;
         e.AcceptedOperation = hit != None && usable ? DataPackageOperation.Copy : DataPackageOperation.None;
         e.DragUIOverride.IsGlyphVisible = false;
         e.DragUIOverride.Caption = hit switch
         {
-            >= 0 when hit < _choices.Count => "Convert to " + _choices[hit].Name,
+            >= 0 when hit < _choices.Count => (_choices[hit].IsOptimize ? "" : "Convert to ") + _choices[hit].Name,
+            PageButtonHit => _page == WheelPage.Convert ? "Hold here for Optimize" : "Hold here for formats",
             CenterHit when usable => "Add to Lemon",
             _ => "",
         };
@@ -245,8 +294,13 @@ public sealed partial class WheelWindow : Window
         var hit = HitTest(e.GetPosition(Ring));
         if (hit == None || (hit >= 0 && hit >= _choices.Count))
             return;
+        // The page button sits inside the hub, so a drop on it counts as one on the hub.
+        if (hit == PageButtonHit)
+            hit = CenterHit;
 
         _dropped = true;
+        _pageTimer.Stop();
+        _pageButton.Visibility = Visibility.Collapsed;
         // Last chance to read the files if no drag event managed to (only possible for a drop on the hub).
         StartLoading(e);
         if (_loading is not null)
@@ -283,7 +337,7 @@ public sealed partial class WheelWindow : Window
         }
     }
 
-    private static IReadOnlyList<Preset> WheelChoices(IReadOnlyList<string> paths)
+    private static IReadOnlyList<Preset> WheelChoices(IReadOnlyList<string> paths, WheelPage page)
     {
         var supported = paths.Where(FormatCatalog.IsSupported).ToList();
         if (supported.Count == 0)
@@ -295,7 +349,7 @@ public sealed partial class WheelWindow : Window
             .Select(g => (FormatCatalog.KindOf(g.Key)!.Value, App.Queue.PresetsFor(g.First())))
             .ToList();
         var kind = supported.GroupBy(p => FormatCatalog.KindOf(p)!.Value).MaxBy(g => g.Count())!.Key;
-        return ConversionWheel.ChooseByKind(perType, kind);
+        return ConversionWheel.ChooseByKind(perType, kind, page);
     }
 
     // ---- Hover and celebration ----
@@ -325,6 +379,18 @@ public sealed partial class WheelWindow : Window
         _hub.Fill = Brush(onHub ? "SubtleFillColorSecondaryBrush" : "CardBackgroundFillColorDefaultBrush");
         Spring(_hub, "Scale", new Vector3(onHub ? 1.1f : 1f), damping: 0.4f);
         Spring(_hubContent, "Scale", new Vector3(onHub ? 1.12f : 1f), damping: 0.4f);
+
+        // Resting on the page button turns the ring, like a spring-loaded folder; leaving it before then doesn't.
+        var onPageButton = hit == PageButtonHit && !_dropped;
+        _pageButton.Background = Brush(onPageButton ? "AccentFillColorDefaultBrush" : "SubtleFillColorSecondaryBrush");
+        var foreground = Brush(onPageButton ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+        _pageButtonText.Foreground = foreground;
+        _pageButtonIcon.Foreground = foreground;
+        Spring(_pageButton, "Scale", new Vector3(onPageButton ? 1.08f : 1f), damping: 0.4f);
+        if (onPageButton && changed)
+            _pageTimer.Start();
+        else if (!onPageButton)
+            _pageTimer.Stop();
 
         // The lemon perks up whenever the pointer lands somewhere new.
         if (changed && hit != None && !_dropped)
@@ -471,6 +537,9 @@ public sealed partial class WheelWindow : Window
         var dx = point.X - Center;
         var dy = point.Y - Center;
         var distance = Math.Sqrt(dx * dx + dy * dy);
+        if (_pageButton.Visibility == Visibility.Visible && Math.Abs(dx) <= PageButtonWidth / 2
+            && point.Y >= PageButtonTop && point.Y <= PageButtonTop + PageButtonHeight)
+            return PageButtonHit;
         if (distance <= InnerRadius)
             return CenterHit;
         // A popped-out slice reaches a bit further, so allow for it.
@@ -522,15 +591,58 @@ public sealed partial class WheelWindow : Window
             Foreground = Brush("TextFillColorSecondaryBrush"),
         };
         _hubContent = new StackPanel { Width = InnerRadius * 2, Spacing = 4, Children = { _hubImage, _hubIcon, _hubText } };
-        _hubContent.SizeChanged += (_, _) =>
-        {
-            Canvas.SetTop(_hubContent, Center - _hubContent.ActualHeight / 2);
-            ElementCompositionPreview.GetElementVisual(_hubContent).CenterPoint =
-                new Vector3((float)_hubContent.ActualWidth / 2, (float)_hubContent.ActualHeight / 2, 0);
-        };
+        _hubContent.SizeChanged += (_, _) => PlaceHubContent();
         Canvas.SetLeft(_hubContent, Center - InnerRadius);
         Canvas.SetZIndex(_hubContent, 2);
         Ring.Children.Add(_hubContent);
+
+        // "Switch" arrows, so it reads as "go to the other ring" rather than as another format.
+        _pageButtonIcon = new FontIcon { Glyph = "\uE8AB", FontSize = 10 };
+        _pageButtonText = new TextBlock { FontSize = 11 };
+        _pageButton = new Border
+        {
+            Width = PageButtonWidth,
+            Height = PageButtonHeight,
+            CornerRadius = new CornerRadius(PageButtonHeight / 2),
+            BorderThickness = new Thickness(1),
+            BorderBrush = Brush("CardStrokeColorDefaultBrush"),
+            Background = Brush("SubtleFillColorSecondaryBrush"),
+            // Hit-testing is done by hand in HitTest; the drag events belong to the whole window.
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed,
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 5,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children = { _pageButtonIcon, _pageButtonText },
+            },
+        };
+        Canvas.SetLeft(_pageButton, Center - PageButtonWidth / 2);
+        Canvas.SetTop(_pageButton, PageButtonTop);
+        Canvas.SetZIndex(_pageButton, 3);
+        ElementCompositionPreview.GetElementVisual(_pageButton).CenterPoint =
+            new Vector3((float)PageButtonWidth / 2, (float)PageButtonHeight / 2, 0);
+        Ring.Children.Add(_pageButton);
+    }
+
+    /// <summary>Centers the lemon and hub text, nudged up when the page button needs the bottom of the hub.</summary>
+    private void PlaceHubContent()
+    {
+        var lift = _pageButton?.Visibility == Visibility.Visible ? 12 : 0;
+        Canvas.SetTop(_hubContent, Center - _hubContent.ActualHeight / 2 - lift);
+        ElementCompositionPreview.GetElementVisual(_hubContent).CenterPoint =
+            new Vector3((float)_hubContent.ActualWidth / 2, (float)_hubContent.ActualHeight / 2, 0);
+    }
+
+    /// <summary>Shows the button only when the other ring has something on it, labeled with where it goes.</summary>
+    private void UpdatePageButton()
+    {
+        var other = _page == WheelPage.Convert ? WheelPage.Optimize : WheelPage.Convert;
+        _pageButton.Visibility = _pages[(int)other].Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        _pageButtonText.Text = other == WheelPage.Optimize ? "Optimize" : "Formats";
+        PlaceHubContent();
     }
 
     private void SetHub(string text, string? icon)

@@ -17,6 +17,9 @@ public interface IConverter
     /// <summary>Whether this converter handles the pair at all, regardless of whether its tool is installed.</summary>
     bool Supports(string sourceExtension, string targetExtension);
 
+    /// <summary>Whether it can honor this preset's options for the pair, e.g. a lossless Optimize of a video can't be.</summary>
+    bool Supports(string sourceExtension, Preset preset) => true;
+
     /// <summary>
     /// Writes <see cref="ConversionRequest.OutputPath"/>. Progress is reported from 0 to 1 when known.
     /// When optimizing, leaving the output empty means "no worthwhile smaller version", and the original is kept.

@@ -2,6 +2,19 @@ using System.Text.Json.Serialization;
 
 namespace Lemon.Core.Presets;
 
+/// <summary>How hard Optimize may squeeze a file.</summary>
+public enum OptimizeStrength
+{
+    /// <summary>Only changes that keep every pixel (images only).</summary>
+    Lossless,
+
+    /// <summary>Lighter encodes that still look the same as the original.</summary>
+    Balanced,
+
+    /// <summary>Like Clop's aggressive mode: slightly lower quality for a noticeably smaller file.</summary>
+    Smaller,
+}
+
 /// <summary>A named set of conversion settings. Unset values mean "keep the source's value".</summary>
 public sealed record Preset
 {
@@ -25,6 +38,9 @@ public sealed record Preset
     public int? VideoCrf { get; init; }
     public int? Fps { get; init; }
     public bool StripMetadata { get; init; }
+
+    /// <summary>Only for Optimize presets.</summary>
+    public OptimizeStrength OptimizeStrength { get; init; } = OptimizeStrength.Balanced;
 
     /// <summary>Optimize mode: same format, smaller file, quality kept close to the original.</summary>
     [JsonIgnore]

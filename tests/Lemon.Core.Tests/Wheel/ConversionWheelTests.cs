@@ -33,23 +33,44 @@ public class ConversionWheelTests
     }
 
     [Fact]
-    public void OptimizeLeadsTheWheelWhenAvailable()
+    public void OptimizeStrengthsGetTheirOwnRing()
     {
-        IReadOnlyList<Preset> available = [Built("img-png"), Built("img-webp"), Built(BuiltInPresets.OptimizeId)];
-        Assert.Equal([BuiltInPresets.OptimizeId, "img-png", "img-webp"], ConversionWheel.Choose([available], MediaKind.Image).Select(p => p.Id));
-        Assert.Equal(("Optimize", "Same format"), ConversionWheel.Label(Built(BuiltInPresets.OptimizeId)));
+        IReadOnlyList<Preset> available =
+            [Built("optimize-smaller"), Built("img-png"), Built(BuiltInPresets.OptimizeId), Built("img-webp"), Built("optimize-lossless")];
+
+        Assert.Equal(["img-png", "img-webp"], ConversionWheel.Choose([available], MediaKind.Image).Select(p => p.Id));
+        Assert.Equal(["optimize-lossless", BuiltInPresets.OptimizeId, "optimize-smaller"],
+            ConversionWheel.Choose([available], MediaKind.Image, WheelPage.Optimize).Select(p => p.Id));
     }
+
+    [Fact]
+    public void OptimizeRingOnlyOffersStrengthsEveryFileSupports()
+    {
+        // A video can't be optimized losslessly, so a photo + video drag only gets Balanced and Smaller.
+        IReadOnlyList<Preset> forJpg = [Built("optimize-lossless"), Built(BuiltInPresets.OptimizeId), Built("optimize-smaller")];
+        IReadOnlyList<Preset> forMp4 = [Built(BuiltInPresets.OptimizeId), Built("optimize-smaller")];
+        Assert.Equal([BuiltInPresets.OptimizeId, "optimize-smaller"],
+            ConversionWheel.ChooseByKind([(MediaKind.Video, forMp4), (MediaKind.Image, forJpg)], MediaKind.Video, WheelPage.Optimize)
+                .Select(p => p.Id));
+    }
+
+    [Theory]
+    [InlineData("optimize-lossless", "Lossless", "Same pixels")]
+    [InlineData(BuiltInPresets.OptimizeId, "Balanced", "Looks the same")]
+    [InlineData("optimize-smaller", "Smaller", "Slightly lower quality")]
+    public void OptimizeLabelsNameTheStrength(string id, string title, string detail) =>
+        Assert.Equal((title, detail), ConversionWheel.Label(Built(id)));
 
     [Fact]
     public void MixedDragFillsTheWheelForTheMainKind()
     {
-        // Photos and a video only share Optimize; the rest of the wheel goes to the photos (the main kind).
-        IReadOnlyList<Preset> forJpg = [Built(BuiltInPresets.OptimizeId), Built("img-png"), Built("img-webp")];
-        IReadOnlyList<Preset> forMp4 = [Built(BuiltInPresets.OptimizeId), Built("vid-webm"), Built("aud-mp3-320")];
+        // Photos and a video share just one preset: it comes first, and the free slots go to the photos (the main kind).
+        IReadOnlyList<Preset> forJpg = [Built("img-png"), Built("img-webp"), Built("aud-mp3-320")];
+        IReadOnlyList<Preset> forMp4 = [Built("aud-mp3-320"), Built("vid-webm")];
 
         var choices = ConversionWheel.ChooseByKind([(MediaKind.Image, forJpg), (MediaKind.Video, forMp4)], MediaKind.Image);
 
-        Assert.Equal([BuiltInPresets.OptimizeId, "img-png", "img-webp"], choices.Select(p => p.Id));
+        Assert.Equal(["aud-mp3-320", "img-png", "img-webp"], choices.Select(p => p.Id));
     }
 
     [Fact]

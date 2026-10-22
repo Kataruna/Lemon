@@ -1,5 +1,12 @@
 namespace Lemon.Core.Wheel;
 
+/// <summary>The wheel's two rings: formats to convert to, and Optimize strengths.</summary>
+public enum WheelPage
+{
+    Convert,
+    Optimize,
+}
+
 /// <summary>Decides which presets appear on the conversion wheel for a set of dragged files.</summary>
 public static class ConversionWheel
 {
@@ -8,11 +15,14 @@ public static class ConversionWheel
     /// <summary>The most useful built-in presets per kind of file, in the order they go around the wheel.</summary>
     private static readonly Dictionary<MediaKind, string[]> Favorites = new()
     {
-        [MediaKind.Image] = [BuiltInPresets.OptimizeId, "img-png", "img-jpg", "img-webp", "doc-pdf", "img-avif", "img-ico", "img-gif", "img-tiff", "img-bmp"],
+        [MediaKind.Image] = ["img-png", "img-jpg", "img-webp", "doc-pdf", "img-avif", "img-ico", "img-gif", "img-tiff", "img-bmp"],
         [MediaKind.Audio] = ["aud-mp3-320", "aud-m4a", "aud-flac", "aud-wav", "aud-opus", "aud-ogg", "aud-mp3-192", "aud-aiff"],
-        [MediaKind.Video] = [BuiltInPresets.OptimizeId, "vid-mp4", "vid-mp4-720", "vid-webm", "vid-gif", "aud-mp3-320", "vid-mov", "vid-mkv", "aud-m4a"],
-        [MediaKind.Document] = [BuiltInPresets.OptimizeId, "doc-pdf", "doc-docx", "doc-html", "doc-txt", "doc-md", "doc-odt", "doc-rtf", "doc-epub"],
+        [MediaKind.Video] = ["vid-mp4", "vid-mp4-720", "vid-webm", "vid-gif", "aud-mp3-320", "vid-mov", "vid-mkv", "aud-m4a"],
+        [MediaKind.Document] = ["doc-pdf", "doc-docx", "doc-html", "doc-txt", "doc-md", "doc-odt", "doc-rtf", "doc-epub"],
     };
+
+    /// <summary>Optimize strengths go around their ring from gentlest to strongest.</summary>
+    private static readonly string[] OptimizeOrder = ["optimize-lossless", BuiltInPresets.OptimizeId, "optimize-smaller"];
 
     /// <summary>
     /// Picks up to <see cref="MaxChoices"/> presets that work for every dragged file: the user's own presets
@@ -20,13 +30,16 @@ public static class ConversionWheel
     /// </summary>
     /// <param name="availablePerFileType">The presets usable for each distinct dragged file type.</param>
     /// <param name="kind">The kind of the dragged files (the most common one when they're mixed).</param>
-    public static IReadOnlyList<Preset> Choose(IReadOnlyList<IReadOnlyList<Preset>> availablePerFileType, MediaKind kind)
+    /// <param name="page">Format presets for the Convert ring, Optimize presets for the Optimize ring.</param>
+    public static IReadOnlyList<Preset> Choose(
+        IReadOnlyList<IReadOnlyList<Preset>> availablePerFileType, MediaKind kind, WheelPage page = WheelPage.Convert)
     {
         if (availablePerFileType.Count == 0)
             return [];
 
-        var favorites = Favorites[kind];
+        var favorites = page == WheelPage.Optimize ? OptimizeOrder : Favorites[kind];
         return availablePerFileType[0]
+            .Where(p => p.IsOptimize == (page == WheelPage.Optimize))
             .Where(p => availablePerFileType.Skip(1).All(list => list.Any(q => q.Id == p.Id)))
             .OrderBy(p => p.IsBuiltIn)
             .ThenBy(p => Array.IndexOf(favorites, p.Id) is var i and >= 0 ? i : int.MaxValue)
@@ -39,11 +52,12 @@ public static class ConversionWheel
     /// files (say photos and a video) isn't left with an empty wheel: presets that fit every file come first, and
     /// the free slots go to presets that fit all files of the main <paramref name="kind"/>.
     /// </summary>
-    public static IReadOnlyList<Preset> ChooseByKind(IReadOnlyList<(MediaKind Kind, IReadOnlyList<Preset> Presets)> availablePerFileType, MediaKind kind)
+    public static IReadOnlyList<Preset> ChooseByKind(
+        IReadOnlyList<(MediaKind Kind, IReadOnlyList<Preset> Presets)> availablePerFileType, MediaKind kind, WheelPage page = WheelPage.Convert)
     {
         var all = availablePerFileType.Select(t => t.Presets).ToList();
         var main = availablePerFileType.Where(t => t.Kind == kind).Select(t => t.Presets).ToList();
-        return Choose(all, kind).Concat(Choose(main, kind)).DistinctBy(p => p.Id).Take(MaxChoices).ToList();
+        return Choose(all, kind, page).Concat(Choose(main, kind, page)).DistinctBy(p => p.Id).Take(MaxChoices).ToList();
     }
 
     /// <summary>
@@ -52,7 +66,14 @@ public static class ConversionWheel
     public static (string Title, string? Detail) Label(Preset preset)
     {
         if (preset.IsOptimize)
-            return ("Optimize", "Same format");
+        {
+            return preset.OptimizeStrength switch
+            {
+                OptimizeStrength.Lossless => ("Lossless", "Same pixels"),
+                OptimizeStrength.Smaller => ("Smaller", "Slightly lower quality"),
+                _ => ("Balanced", "Looks the same"),
+            };
+        }
 
         var extension = FormatCatalog.NormalizeExtension(preset.TargetExtension);
         var title = extension.ToUpperInvariant();

@@ -169,13 +169,14 @@ public sealed partial class QueueViewModel : ObservableObject
             .OrderBy(g => g.Key)
             .Select(g => (g.Key, (IReadOnlyList<Preset>)g.SelectMany(j => j.AvailablePresets).DistinctBy(p => p.Id).ToList()));
 
-    /// <summary>Switches every file that can be optimized to Optimize mode and starts them.</summary>
+    /// <summary>Switches every file that can be optimized to Optimize (Balanced) and starts them.</summary>
     public void OptimizeAll()
     {
         var jobs = new List<JobViewModel>();
         foreach (var job in Jobs.Where(j => j.IsEditable))
         {
-            if (job.AvailablePresets.FirstOrDefault(p => p.IsOptimize) is not { } optimize)
+            if ((job.AvailablePresets.FirstOrDefault(p => p.Id == BuiltInPresets.OptimizeId)
+                 ?? job.AvailablePresets.FirstOrDefault(p => p.IsOptimize)) is not { } optimize)
                 continue;
             job.SelectedPreset = optimize;
             jobs.Add(job);
@@ -252,7 +253,11 @@ public sealed partial class QueueViewModel : ObservableObject
         if (quickTarget is not null)
         {
             var matching = presets.Where(p => FormatCatalog.NormalizeExtension(p.TargetExtension) == quickTarget).ToList();
-            return matching.FirstOrDefault(p => p.Id == last?.Id) ?? matching.FirstOrDefault(p => p.TargetKind == kind) ?? matching.FirstOrDefault();
+            return matching.FirstOrDefault(p => p.Id == last?.Id)
+                // "--optimize" means Balanced; the other strengths are picked on the wheel or in the list.
+                ?? matching.FirstOrDefault(p => p.Id == BuiltInPresets.OptimizeId)
+                ?? matching.FirstOrDefault(p => p.TargetKind == kind)
+                ?? matching.FirstOrDefault();
         }
 
         var extension = FormatCatalog.NormalizeExtension(path);
