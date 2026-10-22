@@ -1,6 +1,6 @@
 # Lemon
 
-A drag-and-drop file converter for Windows 11, in the spirit of Tangerine on macOS. Drop in images, audio, video or documents, pick a preset for each file (or for all of them at once), and convert the whole batch in parallel.
+A drag-and-drop file converter for Windows 11. Drop in images, audio, video or documents, pick a preset for each file (or for all of them at once), and convert the whole batch in parallel.
 
 ## Features
 
