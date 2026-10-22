@@ -3,3 +3,7 @@ obj/
 .vs/
 *.user
 dist/
+
+mac/.build/
+mac/dist/
+.DS_Store

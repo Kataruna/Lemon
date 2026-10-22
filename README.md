@@ -97,3 +97,17 @@ src/Lemon.App/                  WinUI 3 app (unpackaged, self-contained Windows 
   Interop/                      Win32 declarations
 tests/Lemon.Core.Tests/         Same folders as Lemon.Core; Conversion/ also converts real generated media
 ```
+
+## macOS version
+
+A native SwiftUI port lives in `mac/` (macOS 14+). Drop files or folders on the window, pick a preset per file (or *Set all to*), and convert in parallel; Optimize works as described above. It shells out to Homebrew tools: `brew install ffmpeg imagemagick pandoc ghostscript` (LibreOffice is optional, for DOCX/ODT/RTF → PDF). DOCX/ODT/RTF/HTML/TXT conversions use macOS's built-in `textutil`. Presets for missing tools are hidden.
+
+```sh
+mac/make-app.sh      # builds mac/dist/Lemon.app (ad-hoc signed)
+```
+
+**Progress.** Every file shows its real progress: FFmpeg's encode position, ImageMagick's load/process/save meters, Ghostscript's pages, Optimize's candidate steps, and BiRefNet's stages (the model run itself is paced by how long the last one took). While anything converts, the lemon in the menu bar turns into a progress ring for the whole batch, the menu shows "Converting 3 of 7 · 42%" with Cancel, and the window toolbar shows the same as a bar.
+
+**Wheel.** Lemon stays in the menu bar. While dragging files from anywhere, shake the mouse (or hold Shift, like Tangerine) and the wheel pops up under the pointer: drop on a format to convert next to the originals (a notification reports the result), drop on the lemon to add to the queue. The wheel has up to three rings: **Convert**, **Optimize** and **Cut out** (remove the background onto a transparent `name (no background).png`). Cut out offers *Apple Vision* (built in, quick) and, like the Windows build, *BiRefNet Lite / Full quality*: the same pinned models, downloaded in *Settings › Background remover* (SHA-256 checked, stored in `~/Library/Application Support/Lemon/models`), run on the Mac's CPU with ONNX Runtime (about 6 s per image for Lite; ONNX Runtime 1.19's Core ML provider can't compile BiRefNet). BiRefNet handles large images and fine edges better; when Vision fails on a file, a downloaded BiRefNet model finishes it. Press **Tab** (Shift+Tab goes back) to cycle them or **1 / 2 / 3** to jump to one, or scroll, or rest the files on the mode bar under the ring. The keys need Accessibility permission (Lemon asks on first launch); without it, scrolling and the mode bar still work. It watches the mouse globally, which macOS allows without any permission. Releasing the mouse elsewhere closes the wheel.
+
+Not ported: the Space key, the shake/key settings, the right-click menu and custom preset editing.
