@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Lemon.App.Views.PresetsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Lemon.App.Views"
+    xmlns:presets="using:Lemon.Core.Presets"
+    xmlns:vm="using:Lemon.App.ViewModels"
+    Background="Transparent">
+
+    <Grid Padding="24,16,24,16" ColumnSpacing="24">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="300" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Preset list -->
+        <Grid RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Button HorizontalAlignment="Stretch" Command="{x:Bind ViewModel.NewCommand}" AutomationProperties.Name="New preset">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE710;" FontSize="14" />
+                    <TextBlock Text="New preset" />
+                </StackPanel>
+            </Button>
+            <ListView
+                Grid.Row="1"
+                Margin="-4,0"
+                ItemsSource="{x:Bind ViewModel.Items}"
+                SelectedItem="{x:Bind ViewModel.Selected, Mode=TwoWay}">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="presets:Preset">
+                        <StackPanel Padding="0,6">
+                            <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind Summary}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+
+        <!-- Editor -->
+        <ScrollViewer Grid.Column="1" Visibility="{x:Bind views:Ui.Visible(ViewModel.HasSelection), Mode=OneWay}">
+            <StackPanel Spacing="16" MaxWidth="560" HorizontalAlignment="Left" Padding="0,0,16,16">
+                <InfoBar
+                    IsOpen="{x:Bind ViewModel.IsBuiltIn, Mode=OneWay}"
+                    IsClosable="False"
+                    Severity="Informational"
+                    Message="Built-in presets can't be changed. Duplicate this one to make your own version." />
+
+                <TextBox Header="Name" Text="{x:Bind ViewModel.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+
+                <ComboBox
+                    Header="Convert to"
+                    HorizontalAlignment="Stretch"
+                    DisplayMemberPath="Label"
+                    ItemsSource="{x:Bind vm:PresetsViewModel.TargetFormats}"
+                    SelectedItem="{x:Bind ViewModel.Target, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+
+                <StackPanel Spacing="4" Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowQuality), Mode=OneWay}">
+                    <CheckBox Content="Set image quality" IsChecked="{x:Bind ViewModel.UseQuality, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+                    <Slider
+                        Minimum="1"
+                        Maximum="100"
+                        StepFrequency="1"
+                        Header="Quality (higher looks better, makes bigger files)"
+                        Value="{x:Bind ViewModel.Quality, Mode=TwoWay}"
+                        IsEnabled="{x:Bind ViewModel.UseQuality, Mode=OneWay}" />
+                </StackPanel>
+
+                <Grid ColumnSpacing="12" Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowSize), Mode=OneWay}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <NumberBox
+                        Header="Max width (px)"
+                        PlaceholderText="No limit"
+                        Minimum="1"
+                        SpinButtonPlacementMode="Compact"
+                        Value="{x:Bind ViewModel.MaxWidth, Mode=TwoWay}"
+                        IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+                    <NumberBox
+                        Grid.Column="1"
+                        Header="Max height (px)"
+                        PlaceholderText="No limit"
+                        Minimum="1"
+                        SpinButtonPlacementMode="Compact"
+                        Value="{x:Bind ViewModel.MaxHeight, Mode=TwoWay}"
+                        IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+                </Grid>
+
+                <ComboBox
+                    Header="Audio bitrate"
+                    MinWidth="200"
+                    DisplayMemberPath="Label"
+                    ItemsSource="{x:Bind vm:PresetsViewModel.Bitrates}"
+                    SelectedItem="{x:Bind ViewModel.Bitrate, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}"
+                    Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowAudioBitrate), Mode=OneWay}" />
+
+                <Slider
+                    Minimum="15"
+                    Maximum="40"
+                    StepFrequency="1"
+                    Header="Video quality, CRF (lower looks better, makes bigger files; 23 is a good default)"
+                    Value="{x:Bind ViewModel.VideoCrf, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}"
+                    Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowVideoQuality), Mode=OneWay}" />
+
+                <NumberBox
+                    Header="Frame rate (fps)"
+                    PlaceholderText="Same as source"
+                    HorizontalAlignment="Left"
+                    MinWidth="200"
+                    Minimum="1"
+                    Maximum="120"
+                    SpinButtonPlacementMode="Compact"
+                    Value="{x:Bind ViewModel.Fps, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}"
+                    Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowFps), Mode=OneWay}" />
+
+                <ToggleSwitch
+                    Header="Remove metadata (camera info, GPS location, tags)"
+                    IsOn="{x:Bind ViewModel.StripMetadata, Mode=TwoWay}"
+                    IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}"
+                    Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowMetadata), Mode=OneWay}" />
+
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Documents have no extra options."
+                    Visibility="{x:Bind views:Ui.Visible(ViewModel.HasNoOptions), Mode=OneWay}" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Style="{StaticResource AccentButtonStyle}" Content="Save" Command="{x:Bind ViewModel.SaveCommand}" Visibility="{x:Bind views:Ui.Visible(ViewModel.IsEditable), Mode=OneWay}" />
+                    <Button Content="Duplicate" Command="{x:Bind ViewModel.DuplicateCommand}" />
+                    <Button Content="Delete" Command="{x:Bind ViewModel.DeleteCommand}" Visibility="{x:Bind views:Ui.Visible(ViewModel.IsEditable), Mode=OneWay}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

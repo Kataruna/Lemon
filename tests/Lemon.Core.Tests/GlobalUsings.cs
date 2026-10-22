@@ -1,0 +1,9 @@
+global using Lemon.Core.Configuration;
+global using Lemon.Core.Conversion.Converters;
+global using Lemon.Core.Conversion;
+global using Lemon.Core.ExternalTools;
+global using Lemon.Core.Formats;
+global using Lemon.Core.Presets;
+global using Lemon.Core.Shell;
+global using Lemon.Core.Wheel;
+global using Lemon.Core;

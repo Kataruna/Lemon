@@ -1,0 +1,19 @@
+<Solution>
+  <!-- x64 only, so a plain `dotnet build` targets this machine. For ARM64: dotnet build src/Lemon.App -p:Platform=ARM64 -->
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Lemon.App/Lemon.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Lemon.Core/Lemon.Core.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lemon.Core.Tests/Lemon.Core.Tests.csproj">
+      <Platform Project="Any CPU" />
+    </Project>
+  </Folder>
+</Solution>
