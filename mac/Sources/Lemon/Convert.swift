@@ -233,7 +233,9 @@ private func optimizeFile(_ src: URL, _ dst: URL, _ s: String, _ strength: Stren
             let f = info.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ",")
             if f.count == 2, ["hevc", "av1", "vp9"].contains(String(f[0])) || f[1] != "yuv420p" { try Data().write(to: dst); return }
         }
-        var a = ["-hide_banner", "-nostdin", "-y", "-i", src.path, "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-crf", smaller ? "28" : "23", "-preset", "slow", "-c:a", "copy"]
+        // H.264 in 4:2:0 needs even dimensions; odd-sized captures would otherwise fail the encode.
+        var a = ["-hide_banner", "-nostdin", "-y", "-i", src.path, "-map", "0:v:0", "-map", "0:a?", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                 "-c:v", "libx264", "-crf", smaller ? "28" : "23", "-preset", "slow", "-c:a", "copy"]
         if s == "mkv" { a += ["-map", "0:s?", "-c:s", "copy", "-map", "0:t?", "-c:t", "copy"] } else { a += ["-sn", "-movflags", "+faststart"] }
         try await runFfmpeg(ff, a + ["-progress", "pipe:1", "-stats_period", "0.25", "-nostats", dst.path], src, progress)
     case "pdf":
@@ -245,7 +247,8 @@ private func optimizeFile(_ src: URL, _ dst: URL, _ s: String, _ strength: Stren
         try await run(gs, ["-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=pdfwrite", smaller ? "-dPDFSETTINGS=/ebook" : "-dPDFSETTINGS=/printer",
             "-dDownsampleColorImages=true", "-dColorImageResolution=" + dpi, "-dColorImageDownsampleThreshold=1.5",
             "-dDownsampleGrayImages=true", "-dGrayImageResolution=" + dpi, "-dGrayImageDownsampleThreshold=1.5",
-            "-sOutputFile=" + dst.path, src.path], onLine: { line in
+            // Ghostscript reads % in the output name as a page-number format.
+            "-sOutputFile=" + dst.path.replacingOccurrences(of: "%", with: "%%"), src.path], onLine: { line in
                 if pages > 0, line.hasPrefix("Page "), let n = Double(line.dropFirst(5)) { progress(min(n / pages, 1)) }
             })
     default: try await optimizeImage(src, dst, s, strength, progress)
@@ -276,6 +279,8 @@ private func optimizeImage(_ src: URL, _ dst: URL, _ s: String, _ strength: Stre
     defer { (cands + lossy).forEach { try? fm.removeItem(at: $0) } }
     switch s {
     case "png":
+        // ImageMagick reads only an APNG's first frame; leave animated PNGs alone, as the Windows build does.
+        if isAnimatedPNG(src) { try Data().write(to: dst); return }
         cands.append(try await make(["-define", "png:compression-level=9"]))
         if strength != .lossless { lossy.append(try await make(["-colors", "256", "-define", "png:compression-level=9"])) }
     case "gif": cands.append(try await make(["-layers", "optimize"]))
@@ -308,4 +313,20 @@ private func removeBackground(_ src: URL, _ dst: URL, _ progress: @escaping @Sen
     let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
     try CIContext().writePNGRepresentation(of: CIImage(cvPixelBuffer: masked), to: dst, format: .RGBA8, colorSpace: space)
     progress(1)
+}
+
+/// An APNG has an acTL chunk before its first IDAT.
+func isAnimatedPNG(_ url: URL) -> Bool {
+    guard let h = try? FileHandle(forReadingFrom: url) else { return false }
+    defer { try? h.close() }
+    guard let sig = try? h.read(upToCount: 8), sig.count == 8 else { return false }
+    while let head = try? h.read(upToCount: 8), head.count == 8 {
+        let len = head.prefix(4).reduce(0) { $0 << 8 | UInt64($1) }
+        switch String(decoding: head.suffix(4), as: UTF8.self) {
+        case "acTL": return true
+        case "IDAT", "IEND": return false
+        default: guard (try? h.seek(toOffset: h.offsetInFile + len + 4)) != nil else { return false }   // skip data + CRC
+        }
+    }
+    return false
 }

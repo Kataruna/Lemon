@@ -39,6 +39,7 @@ enum JobState: Equatable {
     private var batch: [Job] = []
     private var task: Task<Void, Never>?
     private var wheelJobs: [Job] = []
+    private var cancelled = false
 
     @discardableResult
     func add(_ urls: [URL]) -> [Job] {
@@ -68,7 +69,7 @@ enum JobState: Equatable {
     func start() {
         let pending = jobs.filter { $0.state == .idle && $0.preset != nil }
         guard !pending.isEmpty, !running else { return }
-        running = true
+        running = true; cancelled = false
         batch = pending; refreshOverall()
         // Sample rather than observe every job: each file can report hundreds of updates.
         Task { while running { refreshOverall(); try? await Task.sleep(nanoseconds: 200_000_000) } }
@@ -82,7 +83,7 @@ enum JobState: Equatable {
             running = false
             overall = nil
             if !wheelJobs.isEmpty { notify(wheelJobs); wheelJobs = [] }
-            start()   // jobs added while this batch ran
+            if !cancelled { start() }   // jobs added while this batch ran; after Cancel everything stays put
         }
     }
 
@@ -94,8 +95,9 @@ enum JobState: Equatable {
         if counts.done != done || counts.total != batch.count { counts = (done, batch.count) }
     }
 
-    func cancel() { task?.cancel() }
-    func clear() { jobs.removeAll { $0.state != .idle || !running } }
+    func cancel() { cancelled = true; task?.cancel() }
+    /// While converting, only finished rows go; when idle, the whole list does.
+    func clear() { jobs.removeAll { running ? $0.state.finished : true } }
 
     func setAll(_ kind: Kind, _ name: String) {
         for j in jobs where kindOf[ext(of: j.url)] == kind && j.state == .idle {
