@@ -41,6 +41,27 @@ public class ConversionWheelTests
     }
 
     [Fact]
+    public void MixedDragFillsTheWheelForTheMainKind()
+    {
+        // Photos and a video only share Optimize; the rest of the wheel goes to the photos (the main kind).
+        IReadOnlyList<Preset> forJpg = [Built(BuiltInPresets.OptimizeId), Built("img-png"), Built("img-webp")];
+        IReadOnlyList<Preset> forMp4 = [Built(BuiltInPresets.OptimizeId), Built("vid-webm"), Built("aud-mp3-320")];
+
+        var choices = ConversionWheel.ChooseByKind([(MediaKind.Image, forJpg), (MediaKind.Video, forMp4)], MediaKind.Image);
+
+        Assert.Equal([BuiltInPresets.OptimizeId, "img-png", "img-webp"], choices.Select(p => p.Id));
+    }
+
+    [Fact]
+    public void DragOfOneKindStillOnlyOffersSharedPresets()
+    {
+        IReadOnlyList<Preset> forMp4 = [Built("vid-mp4"), Built("vid-gif"), Built("aud-mp3-320")];
+        IReadOnlyList<Preset> forMov = [Built("vid-mp4"), Built("aud-mp3-320")];
+        Assert.Equal(["vid-mp4", "aud-mp3-320"],
+            ConversionWheel.ChooseByKind([(MediaKind.Video, forMp4), (MediaKind.Video, forMov)], MediaKind.Video).Select(p => p.Id));
+    }
+
+    [Fact]
     public void NothingDraggedMeansNoChoices() => Assert.Empty(ConversionWheel.Choose([], MediaKind.Image));
 
     [Theory]

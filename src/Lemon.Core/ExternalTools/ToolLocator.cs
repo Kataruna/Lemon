@@ -63,8 +63,14 @@ public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, b
 
     private static string? SearchPath(string exe)
     {
-        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
-        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        // Lemon often runs for days in the tray, and its own PATH is a snapshot from when it started. Also read the
+        // saved user and machine PATH, so a tool installed since then (e.g. with winget) is found without a restart.
+        var path = string.Join(Path.PathSeparator,
+            Environment.GetEnvironmentVariable("PATH"),
+            Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User),
+            Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine));
+        foreach (var dir in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {

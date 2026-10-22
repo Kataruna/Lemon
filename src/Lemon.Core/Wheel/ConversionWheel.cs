@@ -35,6 +35,18 @@ public static class ConversionWheel
     }
 
     /// <summary>
+    /// Like <see cref="Choose(IReadOnlyList{IReadOnlyList{Preset}}, MediaKind)"/>, but a drag that mixes kinds of
+    /// files (say photos and a video) isn't left with an empty wheel: presets that fit every file come first, and
+    /// the free slots go to presets that fit all files of the main <paramref name="kind"/>.
+    /// </summary>
+    public static IReadOnlyList<Preset> ChooseByKind(IReadOnlyList<(MediaKind Kind, IReadOnlyList<Preset> Presets)> availablePerFileType, MediaKind kind)
+    {
+        var all = availablePerFileType.Select(t => t.Presets).ToList();
+        var main = availablePerFileType.Where(t => t.Kind == kind).Select(t => t.Presets).ToList();
+        return Choose(all, kind).Concat(Choose(main, kind)).DistinctBy(p => p.Id).Take(MaxChoices).ToList();
+    }
+
+    /// <summary>
     /// Two-line wheel label: the short format ("MP4") over what makes the preset different ("720p small").
     /// </summary>
     public static (string Title, string? Detail) Label(Preset preset)

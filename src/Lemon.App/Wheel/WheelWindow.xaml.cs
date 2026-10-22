@@ -97,6 +97,8 @@ public sealed partial class WheelWindow : Window
         _closing = false;
         _paths = null;
         _loading = null;
+        // Pick up tools installed while Lemon sat in the tray.
+        App.Conversion.RefreshTools();
         _dropped = false;
         _hover = None;
         SetChoices([]);
@@ -258,10 +260,14 @@ public sealed partial class WheelWindow : Window
         if (hit >= 0)
         {
             var preset = _choices[hit];
-            App.Queue.Add(paths, startWith: preset);
+            var started = App.Queue.Add(paths, startWith: preset);
             Celebrate(hit);
-            var files = paths.Count == 1 ? "1 file" : $"{paths.Count} files";
-            SetHub(preset.IsOptimize ? $"Optimizing {files}" : $"Converting {files} to {ConversionWheel.Label(preset).Title}", icon: "îœ¾");
+            var files = started == 1 ? "1 file" : $"{started} files";
+            var text = preset.IsOptimize ? $"Optimizing {files}" : $"Converting {files} to {ConversionWheel.Label(preset).Title}";
+            // In a mixed drag, files the format doesn't fit wait in the queue instead.
+            if (started < paths.Count(FormatCatalog.IsSupported))
+                text += ", rest queued";
+            SetHub(text, icon: "îœ¾");
             ScaleFrom(_hubIcon, Vector3.Zero, Vector3.One, damping: 0.4f);
             HideAfter(TimeSpan.FromMilliseconds(950));
         }
@@ -286,10 +292,10 @@ public sealed partial class WheelWindow : Window
         // Presets depend only on the file type, so check one file per extension.
         var perType = supported
             .GroupBy(p => FormatCatalog.NormalizeExtension(p))
-            .Select(g => App.Queue.PresetsFor(g.First()))
+            .Select(g => (FormatCatalog.KindOf(g.Key)!.Value, App.Queue.PresetsFor(g.First())))
             .ToList();
         var kind = supported.GroupBy(p => FormatCatalog.KindOf(p)!.Value).MaxBy(g => g.Count())!.Key;
-        return ConversionWheel.Choose(perType, kind);
+        return ConversionWheel.ChooseByKind(perType, kind);
     }
 
     // ---- Hover and celebration ----

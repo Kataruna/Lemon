@@ -56,8 +56,11 @@ public sealed partial class QueueViewModel : ObservableObject
 
     /// <summary>Adds files (and the supported files inside any folders) to the queue.</summary>
     /// <param name="quickTarget">From "Convert with Lemon › To PNG": use a preset for this format and start right away.</param>
-    /// <param name="startWith">From the conversion wheel: use this preset where it fits and start right away.</param>
-    public void Add(IEnumerable<string> paths, string? quickTarget = null, Preset? startWith = null)
+    /// <param name="startWith">
+    /// From the conversion wheel: use this preset and start right away. Files it doesn't fit are only queued.
+    /// </param>
+    /// <returns>How many files were started.</returns>
+    public int Add(IEnumerable<string> paths, string? quickTarget = null, Preset? startWith = null)
     {
         var skipped = 0;
         var missingTools = new HashSet<ExternalTool>();
@@ -73,10 +76,14 @@ public sealed partial class QueueViewModel : ObservableObject
             {
                 // Already waiting in the queue. A wheel format or right-click "To PNG" still means "convert it now
                 // like this", so reuse that row instead of silently doing nothing.
-                if (startWith is not null || quickTarget is not null)
+                if (startWith is not null && waiting.AvailablePresets.FirstOrDefault(p => p.Id == startWith.Id) is { } fits)
                 {
-                    waiting.SelectedPreset = waiting.AvailablePresets.FirstOrDefault(p => p.Id == startWith?.Id)
-                        ?? DefaultPreset(path, waiting.AvailablePresets, quickTarget);
+                    waiting.SelectedPreset = fits;
+                    added.Add(waiting);
+                }
+                else if (startWith is null && quickTarget is not null)
+                {
+                    waiting.SelectedPreset = DefaultPreset(path, waiting.AvailablePresets, quickTarget);
                     added.Add(waiting);
                 }
                 continue;
@@ -93,7 +100,8 @@ public sealed partial class QueueViewModel : ObservableObject
             var job = new JobViewModel(path, presets, preset);
             job.PropertyChanged += OnJobChanged;
             Jobs.Add(job);
-            added.Add(job);
+            if (startWith is null || preset?.Id == startWith.Id)
+                added.Add(job);
         }
 
         Notice = skipped switch
@@ -106,8 +114,10 @@ public sealed partial class QueueViewModel : ObservableObject
             Notice += " Installing " + string.Join(" or ", missingTools.Select(ToolLocator.DisplayName)) + " would help: "
                       + string.Join("  ·  ", missingTools.Select(ToolLocator.InstallHint));
 
-        if (quickTarget is not null || startWith is not null)
-            Enqueue(added);
+        if (quickTarget is null && startWith is null)
+            return 0;
+        Enqueue(added);
+        return added.Count(j => j.IsActive);
     }
 
     /// <summary>Starts every file that's ready.</summary>
