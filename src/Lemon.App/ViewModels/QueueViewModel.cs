@@ -256,14 +256,17 @@ public sealed partial class QueueViewModel : ObservableObject
             return matching.FirstOrDefault(p => p.Id == last?.Id)
                 // "--optimize" means Balanced; the other strengths are picked on the wheel or in the list.
                 ?? matching.FirstOrDefault(p => p.Id == BuiltInPresets.OptimizeId)
-                ?? matching.FirstOrDefault(p => p.TargetKind == kind)
+                // "To PNG" means a plain PNG, not the background cutout that also writes PNG.
+                ?? matching.FirstOrDefault(p => p.TargetKind == kind && p.RemoveBackground is null)
+                ?? matching.FirstOrDefault(p => p.RemoveBackground is null)
                 ?? matching.FirstOrDefault();
         }
 
         var extension = FormatCatalog.NormalizeExtension(path);
-        // Optimize is listed first but only becomes the default once the user picks it (or it's all there is).
+        // Optimize and Remove background are listed first but only become the default once the user picks them
+        // (or they're all there is).
         return last
-            ?? presets.FirstOrDefault(p => !p.IsOptimize && FormatCatalog.NormalizeExtension(p.TargetExtension) != extension)
+            ?? presets.FirstOrDefault(p => !p.IsOptimize && p.RemoveBackground is null && FormatCatalog.NormalizeExtension(p.TargetExtension) != extension)
             ?? presets.FirstOrDefault();
     }
 

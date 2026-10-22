@@ -16,6 +16,16 @@ public sealed class BackgroundRemovalConverter : IConverter
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<(BackgroundModel, bool), Lazy<InferenceSession>> Sessions = new();
 
+    /// <summary>
+    /// DirectML sessions allow only one Run at a time, and parallel queue jobs share them, so GPU work goes one at a time.
+    /// CPU sessions are safe to run concurrently.
+    /// </summary>
+    private static readonly Lock GpuLock = new();
+
+    /// <summary>GPU failures in a row per model. A lost device recovers, a GPU that can't run the model doesn't.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<BackgroundModel, int> GpuFailures = new();
+    private const int MaxGpuFailures = 3;
+
     private static InferenceSession Session(BackgroundModel model, bool gpu) =>
         Sessions.GetOrAdd((model, gpu), k => new Lazy<InferenceSession>(() => OpenSession(BackgroundModelInfo.Get(k.Item1).Path, gpu))).Value;
 
@@ -39,18 +49,28 @@ public sealed class BackgroundRemovalConverter : IConverter
                 image.AutoOrient();
                 progress?.Report(0.1);
                 var model = request.Preset.RemoveBackground!.Value;
-                MagickImage mask;
-                try
+                MagickImage? mask = null;
+                if (GpuFailures.GetValueOrDefault(model) < MaxGpuFailures)
                 {
-                    mask = Predict(Session(model, true), image);
+                    lock (GpuLock)
+                    {
+                        try
+                        {
+                            mask = Predict(Session(model, true), image);
+                            GpuFailures[model] = 0;
+                        }
+                        catch (OnnxRuntimeException)
+                        {
+                            // GPU lost mid-run (e.g. "device instance has been suspended"): dispose the dead session so
+                            // the next file tries the GPU again, and finish this one on the CPU. After a few failures
+                            // in a row the GPU can't run this model, so stop rebuilding its session for every file.
+                            GpuFailures.AddOrUpdate(model, 1, (_, n) => n + 1);
+                            if (Sessions.TryRemove((model, true), out var dead) && dead.IsValueCreated)
+                                dead.Value.Dispose();
+                        }
+                    }
                 }
-                catch (OnnxRuntimeException)
-                {
-                    // GPU lost mid-run (e.g. "device instance has been suspended"): drop the dead session so the
-                    // next file tries the GPU again, and finish this one on the CPU.
-                    Sessions.TryRemove((model, true), out _);
-                    mask = Predict(Session(model, false), image);
-                }
+                mask ??= Predict(Session(model, false), image);
                 using var maskScope = mask;
                 cancellationToken.ThrowIfCancellationRequested();
                 mask.Resize(new MagickGeometry(image.Width, image.Height) { IgnoreAspectRatio = true });

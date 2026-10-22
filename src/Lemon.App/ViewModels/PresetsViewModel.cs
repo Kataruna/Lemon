@@ -158,8 +158,9 @@ public sealed partial class PresetsViewModel : ObservableObject
     private void Reload(string? selectId)
     {
         Items.Clear();
-        // Optimize has nothing to tune, so it isn't listed for editing or duplicating.
-        foreach (var preset in _store.All.Where(p => !p.IsOptimize).OrderBy(p => p.TargetKind).ThenBy(p => p.IsBuiltIn))
+        // Optimize and Remove background have nothing to tune (the cutout ignores size and quality, and a copy
+        // retargeted to another format would match no converter), so they aren't listed for editing or duplicating.
+        foreach (var preset in _store.All.Where(p => !p.IsOptimize && p.RemoveBackground is null).OrderBy(p => p.TargetKind).ThenBy(p => p.IsBuiltIn))
             Items.Add(preset);
         Selected = Items.FirstOrDefault(p => p.Id == selectId) ?? Items.FirstOrDefault();
     }

@@ -143,7 +143,9 @@ internal sealed class DragGestureMonitor : IDisposable
             if (isDown && info.VirtualKey == Native.VK_ESCAPE)
                 EscapePressed?.Invoke();
 
-            if (info.VirtualKey == Native.VK_TAB)
+            // When Tab is the wheel key itself, it only opens the wheel (scroll still turns rings); otherwise holding
+            // it to open the wheel would turn the ring on auto-repeat and leave the wheel key's state stuck.
+            if (info.VirtualKey == Native.VK_TAB && WheelKey != Native.VK_TAB)
             {
                 if (isDown && (_swallowingTab || IsWheelOpen?.Invoke() == true && IsLeftButtonDown()))
                 {
