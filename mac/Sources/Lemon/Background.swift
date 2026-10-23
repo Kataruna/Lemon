@@ -61,20 +61,47 @@ enum BiRefNetRunner {
     private static let size = 1024
     private static let mean: [Float] = [0.485, 0.456, 0.406], std: [Float] = [0.229, 0.224, 0.225]
     private static let lock = NSLock()
+    /// One inference at a time: a run already uses every core, so parallel runs only add memory and contention.
+    private static let runLock = NSLock()
     nonisolated(unsafe) private static var sessions: [String: ORTSession] = [:]
     nonisolated(unsafe) private static var env: ORTEnv?
+    nonisolated(unsafe) private static var lastUse = Date()
+    /// A loaded model plus its working memory is several GB (measured: Lite ~6.6 GB at 1024x1024), and Lemon lives in
+    /// the menu bar, so let go of it soon after use. Reloading takes about a second.
+    private static let idleRelease: TimeInterval = 20
 
     /// One cached CPU session per model.
-    // ponytail: CPU only, ~6 s per image for Lite. ONNX Runtime 1.19's Core ML provider hangs compiling BiRefNet for
-    // the Neural Engine (12+ min) and crashes in ML Program mode; retry Core ML when the Swift package moves past 1.19.
+    // ponytail: CPU only, ~3 s per image for Lite and ~7.5 s for Full on an M2 Pro. Core ML was measured on ORT 1.24.2
+    // and lost: NeuralNetwork mode hangs compiling; ML Program needs the model patched (Convs without `pads`) and then
+    // loads in 66-106 s and runs 4x slower than CPU. Retry when ORT's Core ML provider handles BiRefNet's dynamic shapes.
     private static func session(_ m: BiRefNet) throws -> ORTSession {
         lock.lock(); defer { lock.unlock() }
+        lastUse = Date()
         if let s = sessions[m.file] { return s }
         if env == nil { env = try ORTEnv(loggingLevel: .warning) }
-        let s = try ORTSession(env: env!, modelPath: m.path.path, sessionOptions: try ORTSessionOptions())
+        let options = try ORTSessionOptions()
+        // Performance cores only: the efficiency cores finish their share last and hold up every layer
+        // (measured: Lite 3.1 s on the 6 P-cores vs 3.4 s with ORT's default of all 10 cores, 3.8 s on 12 threads).
+        var pCores: Int32 = 0, len = MemoryLayout<Int32>.size
+        if sysctlbyname("hw.perflevel0.physicalcpu", &pCores, &len, nil, 0) == 0, pCores > 0 { try options.setIntraOpNumThreads(pCores) }
+        let s = try ORTSession(env: env!, modelPath: m.path.path, sessionOptions: options)
         sessions[m.file] = s
+        scheduleRelease()
         return s
     }
+
+    private static func scheduleRelease() {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + idleRelease) {
+            lock.lock(); defer { lock.unlock() }
+            guard !sessions.isEmpty else { return }
+            if Date().timeIntervalSince(lastUse) >= idleRelease { sessions.removeAll() } else {
+                DispatchQueue.global(qos: .utility).async { scheduleRelease() }   // still in use; look again later
+            }
+        }
+    }
+
+    /// Drops a model's session, e.g. when its file is deleted.
+    static func release(_ m: BiRefNet) { lock.lock(); sessions[m.file] = nil; lock.unlock() }
 
     /// How long the last run of each model took here, to pace the progress bar during inference.
     nonisolated(unsafe) private static var lastRun: [String: Double] = [:]
@@ -82,7 +109,7 @@ enum BiRefNetRunner {
     static func removeBackground(_ m: BiRefNet, _ src: URL, _ dst: URL, _ progress: @escaping @Sendable (Double?) -> Void) throws {
         progress(0.02)
         guard let image = CIImage(contentsOf: src, options: [.applyOrientationProperty: true]) else { throw LemonError(message: "Couldn't read the image.") }
-        let ctx = CIContext(), e = image.extent, n = size * size
+        let ctx = sharedCIContext, e = image.extent, n = size * size
         let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
 
         // Squash to 1024x1024 over white (alpha removed), then normalize into a 1x3x1024x1024 tensor.
@@ -97,13 +124,15 @@ enum BiRefNetRunner {
         progress(0.15)
 
         // The model is one opaque call, so the bar moves on the time the previous run took, stopping short of done.
-        lock.lock(); let expected = lastRun[m.file] ?? (m.engine == .lite ? 6 : 20); lock.unlock()
+        // The clock starts once it's this file's turn, not while it waits behind another one.
+        runLock.lock()
+        lock.lock(); let expected = lastRun[m.file] ?? (m.engine == .lite ? 5 : 10); lock.unlock()
         let start = Date(), timer = DispatchSource.makeTimerSource(queue: .global())
         timer.schedule(deadline: .now(), repeating: 0.25)
         timer.setEventHandler { progress(0.15 + 0.7 * min(Date().timeIntervalSince(start) / expected, 0.97)) }
         timer.resume()
         let out: [Float]
-        do { defer { timer.cancel() }; out = try predict(session(m), input) }
+        do { defer { timer.cancel(); runLock.unlock() }; out = try predict(session(m), input) }
         lock.lock(); lastRun[m.file] = Date().timeIntervalSince(start); lock.unlock()
         progress(0.86)
         guard out.count >= n else { throw LemonError(message: "Background removal failed: unexpected model output.") }
@@ -124,7 +153,10 @@ enum BiRefNetRunner {
         let data = input.withUnsafeBufferPointer { NSMutableData(bytes: $0.baseAddress, length: $0.count * 4) }
         let tensor = try ORTValue(tensorData: data, elementType: .float, shape: [1, 3, NSNumber(value: size), NSNumber(value: size)])
         guard let inName = try s.inputNames().first, let outName = try s.outputNames().first else { throw LemonError(message: "Unexpected model.") }
-        let result = try s.run(withInputs: [inName: tensor], outputNames: [outName], runOptions: nil)
+        // Without this, ONNX Runtime's CPU arena keeps growing between runs (measured: 6.4 GB after one, 11 GB after two).
+        let options = try ORTRunOptions()
+        try options.addConfigEntry(withKey: "memory.enable_memory_arena_shrinkage", value: "cpu:0")
+        let result = try s.run(withInputs: [inName: tensor], outputNames: [outName], runOptions: options)
         guard let raw = try result[outName]?.tensorData() as Data? else { throw LemonError(message: "No model output.") }
         return raw.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
@@ -150,5 +182,5 @@ enum BiRefNetRunner {
         }
     }
     func cancel(_ m: BiRefNet) { tasks[m.file]?.cancel() }
-    func delete(_ m: BiRefNet) { try? FileManager.default.removeItem(at: m.path); objectWillChange.send() }
+    func delete(_ m: BiRefNet) { BiRefNetRunner.release(m); try? FileManager.default.removeItem(at: m.path); objectWillChange.send() }
 }

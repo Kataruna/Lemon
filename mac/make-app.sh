@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds dist/Lemon.app (ad-hoc signed). Run from anywhere.
+# Builds dist/Lemon.app. Run from anywhere.
 set -e
 cd "$(dirname "$0")"
 swift build -c release
@@ -20,7 +20,7 @@ cat > "$APP/Contents/Info.plist" <<'PL'
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Lemon</string>
 <key>CFBundleExecutable</key><string>Lemon</string>
-<key>CFBundleIdentifier</key><string>com.lemon.converter</string>
+<key>CFBundleIdentifier</key><string>com.sarabunari.lemon</string>
 <key>CFBundleIconFile</key><string>Lemon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -32,5 +32,10 @@ cat > "$APP/Contents/Info.plist" <<'PL'
 </dict></array>
 </dict></plist>
 PL
-codesign --force --deep -s - "$APP"
-echo "Built mac/$APP"
+# Sign with a real certificate when there is one: macOS keys the Accessibility grant (needed for the wheel's keys) to
+# the signature, and an ad-hoc signature changes with every build, so each rebuild would ask for permission again.
+# Uses the "Thanayos Siratranont" certificate (self-signed, in the login keychain; untrusted is fine for codesign).
+# Override with LEMON_SIGN_ID=<name or hash>; with neither available, fall back to ad-hoc.
+ID=${LEMON_SIGN_ID:-$(security find-identity -p codesigning | grep '"Thanayos Siratranont"' | head -1 | awk '{print $2}')}
+codesign --force --deep -s "${ID:--}" "$APP"
+echo "Built mac/$APP (signed with ${ID:-ad-hoc})"

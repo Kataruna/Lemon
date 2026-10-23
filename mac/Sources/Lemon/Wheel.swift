@@ -59,10 +59,15 @@ enum WheelMode: Int, CaseIterable {
 /// Up to 8 presets that work for every dragged file; a mixed drag falls back to what fits the main kind.
 func wheelChoices(_ urls: [URL], _ mode: WheelMode) -> [Preset] {
     let optimize = mode == .optimize
-    let per = urls.map { u in (kindOf[ext(of: u)], presets(for: u).filter(mode.holds)) }.filter { $0.0 != nil }
+    // Presets depend only on the extension, so a folder of 5,000 photos is one lookup, not 5,000.
+    var fileCount: [String: Int] = [:]
+    for u in urls where kindOf[ext(of: u)] != nil { fileCount[ext(of: u), default: 0] += 1 }
+    let per = fileCount.keys.sorted().map { e in (kindOf[e], presets(for: URL(fileURLWithPath: "x." + e)).filter(mode.holds)) }
     guard !per.isEmpty else { return [] }
-    let kinds = per.compactMap(\.0)
-    let main = Dictionary(grouping: kinds, by: { $0 }).max { $0.value.count < $1.value.count }!.key
+    // The main kind is the one with the most files, not the most extensions.
+    var filesByKind: [Kind: Int] = [:]
+    for (e, n) in fileCount { filesByKind[kindOf[e]!, default: 0] += n }
+    let main = filesByKind.max { $0.value < $1.value }!.key
     func rank(_ p: Preset) -> Int { mode == .tools ? [BGEngine.vision, .lite, .full].firstIndex(of: p.removeBackground!)! : optimize ? [Strength.lossless, .balanced, .smaller].firstIndex(of: p.strength!)! : favorites[main]!.firstIndex(of: p.name) ?? 99 }
     func pick(_ lists: [[Preset]]) -> [Preset] {
         lists[0].filter { p in lists.dropFirst().allSatisfy { $0.contains(p) } }.sorted { rank($0) < rank($1) }
@@ -89,7 +94,6 @@ let tangerineDeep = Color(red: 1.0, green: 0.36, blue: 0.0)
 
 @MainActor final class WheelModel: ObservableObject {
     static let size: CGFloat = 380, inner: CGFloat = 60, outer: CGFloat = 152
-    @Published var urls: [URL] = []
     @Published var mode = WheelMode.convert
     @Published var hovered: Preset?
     @Published var lemonHot = false
@@ -103,7 +107,7 @@ let tangerineDeep = Color(red: 1.0, green: 0.36, blue: 0.0)
     private var flipTask: Task<Void, Never>?
 
     func load(_ urls: [URL]) {
-        self.urls = urls; shown = false; hovered = nil; lemonHot = false; switchHot = false
+        shown = false; hovered = nil; lemonHot = false; switchHot = false
         byMode = Dictionary(uniqueKeysWithValues: WheelMode.allCases.map { ($0, wheelChoices(urls, $0)) })
         mode = modes.first ?? .convert
     }
@@ -120,7 +124,8 @@ let tangerineDeep = Color(red: 1.0, green: 0.36, blue: 0.0)
     /// What is under the pointer. p is in wheel coordinates, y down, origin top-left.
     func hover(at p: CGPoint) {
         let dx = p.x - Self.size / 2, dy = p.y - Self.size / 2, d = hypot(dx, dy)
-        lemonHot = d < Self.inner
+        // draggingUpdated fires nonstop; assigning a @Published even to the same value redraws the whole wheel.
+        if lemonHot != (d < Self.inner) { lemonHot = d < Self.inner }
         let onSwitch = canSwitch && abs(dx) < WheelView.barWidth(modes.count) / 2 && dy > Self.outer + 4 && dy < Self.outer + 36
         var best: Preset?
         if d >= Self.inner, !onSwitch, !choices.isEmpty {
@@ -354,7 +359,7 @@ final class WheelHost: NSHostingView<WheelView> {
             MainActor.assumeIsolated {
                 let me = WheelController.shared
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    if let t = me.tap { CGEvent.tapEnable(tap: t, enable: true) }
+                    if let t = me.tap, me.panel?.isVisible == true { CGEvent.tapEnable(tap: t, enable: true) }
                     return Unmanaged.passUnretained(event)
                 }
                 return me.key(event) ? nil : Unmanaged.passUnretained(event)
@@ -362,6 +367,8 @@ final class WheelHost: NSHostingView<WheelView> {
         }, userInfo: nil)
         guard let tap else { return }
         CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
+        // Every keystroke on the Mac waits on an enabled tap, so it's only on while the wheel is up.
+        CGEvent.tapEnable(tap: tap, enable: panel?.isVisible == true)
     }
 
     /// Tab / Shift+Tab cycle the rings, 1 2 3 jump to one. Returns true to swallow the key.
@@ -393,18 +400,23 @@ final class WheelHost: NSHostingView<WheelView> {
             let shaken = shake.add(NSEvent.mouseLocation, e.timestamp) || e.modifierFlags.contains(.shift)
             guard down, !fired, shaken, pb.changeCount != dragCount,
                   let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
+            fired = true   // once per drag, so an unsupported drag doesn't re-read the pasteboard on every move
             let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
-            guard !flat.isEmpty else { return }
-            fired = true; show(flat)
+            if !flat.isEmpty { show(flat) }
         default: break
         }
     }
 
     private func show(_ urls: [URL]) {
-        // Folders: look inside so the right formats are offered.
-        let files = urls.flatMap { u -> [URL] in
-            guard u.hasDirectoryPath else { return [u] }
-            return (FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])?.allObjects as? [URL] ?? []).filter { kindOf[ext(of: $0)] != nil }
+        // Folders: look inside so the right formats are offered. This runs mid-drag on the main thread, so only a
+        // sample is read; the formats on offer come from the extensions found.
+        var files: [URL] = []
+        for u in urls {
+            guard u.hasDirectoryPath else { files.append(u); continue }
+            guard let it = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { continue }
+            var scanned = 0
+            // ponytail: first 5,000 entries; a rare type deep in a huge folder may be missed (the drop still adds all).
+            while scanned < 5_000, let f = it.nextObject() as? URL { scanned += 1; if kindOf[ext(of: f)] != nil { files.append(f) } }
         }
         model.load(files)
         guard !model.choices.isEmpty else { return }
@@ -425,10 +437,14 @@ final class WheelHost: NSHostingView<WheelView> {
         }
         panel?.setFrame(NSRect(origin: o, size: NSSize(width: s, height: s)), display: true)
         panel?.orderFrontRegardless()
+        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) { model.shown = true }
     }
 
-    private func hide() { panel?.orderOut(nil) }
+    private func hide() {
+        panel?.orderOut(nil)
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+    }
 
     private func pick(_ p: Preset, _ urls: [URL]) {
         hide(); sharedQueue.addAndRun(urls, p)

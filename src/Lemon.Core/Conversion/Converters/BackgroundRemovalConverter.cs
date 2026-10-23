@@ -110,19 +110,26 @@ public sealed class BackgroundRemovalConverter : IConverter
     /// <summary>Runs the model and returns its 1024x1024 foreground mask as a grayscale image.</summary>
     private static MagickImage Predict(InferenceSession session, MagickImage source)
     {
-        var input = new DenseTensor<float>([1, 3, Size, Size]);
+        // Planar CHW straight into the tensor's buffer (the 4-D indexer costs a bounds check and stride sum per value).
+        var buffer = new float[3 * Size * Size];
         using (var small = new MagickImage(source))
         {
             small.Alpha(AlphaOption.Remove);
             small.Resize(new MagickGeometry(Size, Size) { IgnoreAspectRatio = true });
             using var pixels = small.GetPixels();
             var data = pixels.ToByteArray(PixelMapping.RGB)!;
-            for (var i = 0; i < Size * Size; i++)
-                for (var c = 0; c < 3; c++)
-                    input[0, c, i / Size, i % Size] = (data[i * 3 + c] / 255f - Mean[c]) / Std[c];
+            for (var c = 0; c < 3; c++)
+                for (var i = 0; i < Size * Size; i++)
+                    buffer[c * Size * Size + i] = (data[i * 3 + c] / 255f - Mean[c]) / Std[c];
         }
+        var input = new DenseTensor<float>(buffer, [1, 3, Size, Size]);
 
-        using var results = session.Run([NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), input)]);
+        // Without arena shrinkage ONNX Runtime's CPU arena keeps growing between runs (measured on the Mac build with
+        // the same model: 6.4 GB after one run, 11 GB after two; with it, steady at about 6.5 GB).
+        using var options = new RunOptions();
+        options.AddRunConfigEntry("memory.enable_memory_arena_shrinkage", "cpu:0");
+        using var results = session.Run(
+            [NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), input)], session.OutputMetadata.Keys.ToList(), options);
         var output = results.First().AsTensor<float>().ToArray();
 
         // The export returns raw logits; squash them to 0..1 unless it already did.
