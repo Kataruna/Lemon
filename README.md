@@ -2,6 +2,8 @@
 
 A drag-and-drop file converter for Windows 11. Drop in images, audio, video or documents, pick a preset for each file (or for all of them at once), and convert the whole batch in parallel.
 
+**Download:** see the [Releases page](https://github.com/Kataruna/Lemon/releases) and the [install guide](INSTALL.md).
+
 ## Features
 
 - **Conversion wheel.** While you drag files anywhere in Windows (Explorer, the desktop, a browser…), shake the mouse or press **Space** and a wheel of formats pops up under the pointer. Drop on a format to convert right away, next to the originals, or drop on the lemon in the middle to add the files to the queue. The key is only intercepted during an actual drag-and-drop. Lemon must be running (minimized is fine). Shake and key are configurable in Settings.
