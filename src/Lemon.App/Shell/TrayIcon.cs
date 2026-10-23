@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using ImageMagick;
+using ImageMagick.Drawing;
 
 namespace Lemon.App.Shell;
 
@@ -21,13 +23,22 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private readonly nint _hwnd;
     private readonly nint _icon;
     private readonly string _tooltip;
+    private readonly string _iconPath;
+    /// <summary>Progress ring icons by step, drawn once each and kept for later batches.</summary>
+    private readonly Dictionary<int, nint> _rings = [];
+    private nint _shownIcon;
+    private string _shownTip;
     private bool _disposed;
+
+    /// <summary>The ring moves in 5% steps, so a batch redraws the icon at most 20 times.</summary>
+    private const int RingSteps = 20;
 
     /// <param name="menu">Builds the right-click menu each time it opens; null entries are separators.</param>
     public TrayIcon(string iconPath, string tooltip, Func<IReadOnlyList<MenuItem?>> menu)
     {
         _menu = menu;
-        _tooltip = tooltip;
+        _tooltip = _shownTip = tooltip;
+        _iconPath = iconPath;
         _wndProc = OnMessage; // kept in a field so the GC can't collect it while Windows calls it
 
         var instance = GetModuleHandleW(null);
@@ -49,8 +60,61 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         }
 
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
-        _icon = LoadImageW(0, iconPath, 1 /* IMAGE_ICON */, GetSystemMetrics(49), GetSystemMetrics(50), 0x10 /* LR_LOADFROMFILE */);
+        _icon = _shownIcon = LoadImageW(0, iconPath, 1 /* IMAGE_ICON */, GetSystemMetrics(49), GetSystemMetrics(50), 0x10 /* LR_LOADFROMFILE */);
         AddIcon();
+    }
+
+    /// <summary>
+    /// Turns the icon into a progress ring around a small lemon (like the macOS menu bar icon), with
+    /// <paramref name="status"/> as its tooltip; null puts the plain lemon and normal tooltip back.
+    /// </summary>
+    public void SetProgress(double? fraction, string? status)
+    {
+        var icon = fraction is { } f ? Ring((int)Math.Round(Math.Clamp(f, 0, 1) * RingSteps)) : _icon;
+        var tip = fraction is null || string.IsNullOrEmpty(status) ? _tooltip : "Lemon: " + status;
+        if (icon == _shownIcon && tip == _shownTip)
+            return;
+        _shownIcon = icon;
+        _shownTip = tip;
+        var data = NewData(NIF_ICON | NIF_TIP | NIF_SHOWTIP);
+        data.Icon = icon;
+        Copy(tip, data.Tip, 128);
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+
+    private nint Ring(int step)
+    {
+        if (_rings.TryGetValue(step, out var cached))
+            return cached;
+
+        // Drawn at 4x and scaled down, for smooth edges at tray size.
+        var size = (uint)GetSystemMetrics(49);
+        var big = size * 4;
+        var stroke = big / 7.0;
+        var radius = big / 2.0 - stroke / 2 - 2;
+        using var image = new MagickImage(MagickColors.Transparent, big, big);
+        var drawables = new Drawables().StrokeWidth(stroke).FillColor(MagickColors.Transparent).StrokeLineCap(LineCap.Round)
+            .StrokeColor(new MagickColor(128, 128, 128, 110)).Circle(big / 2.0, big / 2.0, big / 2.0, big / 2.0 - radius);
+        if (step > 0)
+        {
+            // Clockwise from 12 o'clock, in Lemon's tangerine.
+            drawables.StrokeColor(new MagickColor(0xFF, 0x8C, 0x42))
+                .Arc(big / 2.0 - radius, big / 2.0 - radius, big / 2.0 + radius, big / 2.0 + radius, -90, -90 + 360.0 * step / RingSteps);
+        }
+        drawables.Draw(image);
+
+        using (var lemon = new MagickImage(Path.ChangeExtension(_iconPath, ".png")))
+        {
+            var inner = (uint)(2 * (radius - stroke / 2) - 2);
+            lemon.Resize(inner, inner);
+            image.Composite(lemon, Gravity.Center, CompositeOperator.Over);
+        }
+        image.Resize(size, size);
+        var png = image.ToByteArray(MagickFormat.Png);
+        nint icon;
+        fixed (byte* bytes = png)
+            icon = CreateIconFromResourceEx(bytes, (uint)png.Length, true, 0x00030000, (int)size, (int)size, 0);
+        return _rings[step] = icon;
     }
 
     /// <summary>Left click on the icon.</summary>
@@ -78,14 +142,16 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         Shell_NotifyIconW(NIM_DELETE, &data);
         DestroyWindow(_hwnd);
         DestroyIcon(_icon);
+        foreach (var ring in _rings.Values)
+            DestroyIcon(ring);
     }
 
     private void AddIcon()
     {
         var data = NewData(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
         data.CallbackMessage = CallbackMessage;
-        data.Icon = _icon;
-        Copy(_tooltip, data.Tip, 128);
+        data.Icon = _shownIcon;
+        Copy(_shownTip, data.Tip, 128);
         Shell_NotifyIconW(NIM_ADD, &data);
         data.Version = 4; // NOTIFYICON_VERSION_4: richer click events, coordinates in wParam
         Shell_NotifyIconW(NIM_SETVERSION, &data);
@@ -240,6 +306,9 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DestroyIcon(nint icon);
+
+    [LibraryImport("user32.dll")]
+    private static partial nint CreateIconFromResourceEx(byte* data, uint size, [MarshalAs(UnmanagedType.Bool)] bool icon, uint version, int width, int height, uint flags);
 
     [LibraryImport("user32.dll")]
     private static partial int GetSystemMetrics(int index);

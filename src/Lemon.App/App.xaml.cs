@@ -31,8 +31,6 @@ public partial class App : Application
 
     private static DragGestureMonitor? _gestures;
     private static TrayIcon? _tray;
-    private static readonly List<JobViewModel> UnreportedFailures = [];
-    private static DispatcherQueueTimer? _failureTimer;
 
     internal static LaunchRequest InitialLaunch { get; set; } = LaunchRequest.Empty;
 
@@ -57,7 +55,12 @@ public partial class App : Application
     protected override void OnLaunched(Microsoft.UI.Xaml.LaunchActivatedEventArgs args)
     {
         Queue = new QueueViewModel(Settings, Presets, Conversion);
-        Queue.JobFailed += OnJobFailed;
+        Queue.BatchFinished += OnBatchFinished;
+        Queue.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(QueueViewModel.BatchProgress) or nameof(QueueViewModel.BatchStatus))
+                _tray?.SetProgress(Queue.BatchProgress, Queue.BatchStatus);
+        };
 
         var window = new MainWindow();
         StartTray(window);
@@ -155,40 +158,39 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Pops up a Windows notification for failures the user can't see (window hidden or in the background).
-    /// Failures that happen close together, e.g. in one batch, are reported together.
+    /// Pops up a Windows notification when a batch finishes while the window is hidden or in the background:
+    /// what was done, or what failed and why. Canceled jobs aren't news, so a batch of only those says nothing.
     /// </summary>
-    private static void OnJobFailed(JobViewModel job)
+    private static void OnBatchFinished(IReadOnlyList<JobViewModel> jobs)
     {
-        if (Window is { IsInForeground: true })
+        if (Window is { IsInForeground: true } || _tray is null)
             return;
 
-        UnreportedFailures.Add(job);
-        if (_failureTimer is null)
+        var done = jobs.Where(j => j.IsDone).ToList();
+        var failed = jobs.Where(j => j.IsFailed).ToList();
+        if (failed.Count > 0)
         {
-            _failureTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
-            _failureTimer.Interval = TimeSpan.FromSeconds(1.5);
-            _failureTimer.IsRepeating = false;
-            _failureTimer.Tick += (_, _) => ReportFailures();
+            var first = failed[0];
+            var title = done.Count > 0 ? $"{done.Count} done, {failed.Count} failed"
+                : failed.Count == 1 ? $"Couldn't convert {first.FileName}"
+                : $"{failed.Count} files couldn't be converted";
+            var message = failed.Count == 1 && done.Count == 0 ? first.Error ?? "Something went wrong." : $"{first.FileName}: {first.Error}";
+            _tray.ShowNotification(title, message + "\nClick to open Lemon.", isError: true);
         }
-        _failureTimer.Start();
-    }
-
-    private static void ReportFailures()
-    {
-        var failures = UnreportedFailures.ToList();
-        UnreportedFailures.Clear();
-        if (failures.Count == 0 || _tray is null)
-            return;
-
-        var first = failures[0];
-        var title = failures.Count == 1
-            ? $"Couldn't convert {first.FileName}"
-            : $"{failures.Count} files couldn't be converted";
-        var message = failures.Count == 1
-            ? first.Error ?? "Something went wrong."
-            : $"{first.FileName}: {first.Error}";
-        _tray.ShowNotification(title, message + "\nClick to open Lemon.", isError: true);
+        else if (done.Count > 0)
+        {
+            var past = QueueViewModel.BatchVerb(done) switch
+            {
+                "Removing background" => "Removed background from",
+                "Optimizing" => "Optimized",
+                "Resizing" => "Resized",
+                _ => "Converted",
+            };
+            var title = $"{past} {(done.Count == 1 ? done[0].FileName : $"{done.Count} files")}";
+            var message = done.Count == 1 ? done[0].StatusText
+                : string.IsNullOrWhiteSpace(Settings.OutputFolder) ? "Saved next to the originals." : $"Saved in {Settings.OutputFolder}.";
+            _tray.ShowNotification(title, message + "\nClick to open Lemon.", isError: false);
+        }
     }
 
     /// <summary>Called on a background thread when another Lemon process forwards its launch to us.</summary>

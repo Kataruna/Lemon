@@ -4,7 +4,7 @@ public sealed record ConversionRequest(string InputPath, string OutputPath, Pres
 {
     public string SourceExtension => FormatCatalog.NormalizeExtension(InputPath);
     /// <summary>The output's extension. Optimize keeps the source's.</summary>
-    public string TargetExtension => Preset.IsOptimize ? SourceExtension : FormatCatalog.NormalizeExtension(Preset.TargetExtension);
+    public string TargetExtension => Preset.TargetExtension == Preset.SameFormat ? SourceExtension : FormatCatalog.NormalizeExtension(Preset.TargetExtension);
 }
 
 public interface IConverter

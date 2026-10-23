@@ -14,6 +14,12 @@ public static class BuiltInPresets
         Make("img-nobg", "Remove background – Lite", "png", p => p with { RemoveBackground = BackgroundModel.Lite }),
         Make("img-nobg-full", "Remove background – Full quality", "png", p => p with { RemoveBackground = BackgroundModel.Full }),
 
+        // Sizes are for the long edge, so portrait photos shrink the same way as landscape ones.
+        Make("resize-4k", "Resize – 4K", Preset.SameFormat, p => p with { MaxWidth = 3840, MaxHeight = 3840 }),
+        Make("resize-fhd", "Resize – Full HD", Preset.SameFormat, p => p with { MaxWidth = 1920, MaxHeight = 1920 }),
+        Make("resize-hd", "Resize – HD", Preset.SameFormat, p => p with { MaxWidth = 1280, MaxHeight = 1280 }),
+        Make("resize-sd", "Resize – SD", Preset.SameFormat, p => p with { MaxWidth = 640, MaxHeight = 640 }),
+
         Make("img-png", "PNG", "png"),
         Make("img-jpg", "JPEG – High quality", "jpg", p => p with { Quality = 90 }),
         Make("img-webp", "WebP – Web optimized", "webp", p => p with { Quality = 80, MaxWidth = 1920, MaxHeight = 1920, StripMetadata = true }),

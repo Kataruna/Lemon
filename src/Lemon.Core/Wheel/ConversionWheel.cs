@@ -1,11 +1,12 @@
 namespace Lemon.Core.Wheel;
 
-/// <summary>The wheel's rings: formats to convert to, Optimize strengths, and Remove background models.</summary>
+/// <summary>The wheel's rings: formats to convert to, Optimize strengths, Remove background models and image sizes.</summary>
 public enum WheelPage
 {
     Convert,
     Optimize,
     RemoveBackground,
+    Resize,
 }
 
 /// <summary>Decides which presets appear on the conversion wheel for a set of dragged files.</summary>
@@ -27,9 +28,15 @@ public static class ConversionWheel
 
     private static readonly string[] RemoveBackgroundOrder = ["img-nobg", "img-nobg-full"];
 
+    /// <summary>Sizes go around their ring from largest to smallest.</summary>
+    private static readonly string[] ResizeOrder = ["resize-4k", "resize-fhd", "resize-hd", "resize-sd"];
+
     /// <summary>The ring a preset belongs on.</summary>
     public static WheelPage PageOf(Preset preset) =>
-        preset.IsOptimize ? WheelPage.Optimize : preset.RemoveBackground is not null ? WheelPage.RemoveBackground : WheelPage.Convert;
+        preset.IsOptimize ? WheelPage.Optimize
+        : preset.IsResize ? WheelPage.Resize
+        : preset.RemoveBackground is not null ? WheelPage.RemoveBackground
+        : WheelPage.Convert;
 
     /// <summary>
     /// Picks up to <see cref="MaxChoices"/> presets that work for every dragged file: the user's own presets
@@ -48,6 +55,7 @@ public static class ConversionWheel
         {
             WheelPage.Optimize => OptimizeOrder,
             WheelPage.RemoveBackground => RemoveBackgroundOrder,
+            WheelPage.Resize => ResizeOrder,
             _ => Favorites[kind],
         };
         return availablePerFileType[0]
@@ -86,6 +94,9 @@ public static class ConversionWheel
                 _ => ("Balanced", "Looks the same"),
             };
         }
+
+        if (preset.IsResize)
+            return (preset.Name.Split(" – ", 2, StringSplitOptions.TrimEntries)[^1], $"{preset.MaxWidth ?? preset.MaxHeight} px");
 
         if (preset.RemoveBackground is { } model)
             return model == BackgroundModel.Lite ? ("Lite", "Remove background") : ("Full", "Best quality");

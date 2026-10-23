@@ -54,6 +54,39 @@ public sealed class ConversionTests : IDisposable
             Assert.Equal(640u, result.Width);
     }
 
+    [Fact]
+    public async Task ResizeShrinksTheLongEdgeInTheSameFormat()
+    {
+        var source = MakePng(640, 960);
+        var sd = BuiltInPresets.All.Single(p => p.Id == "resize-sd");
+
+        var output = await _service.ConvertAsync(source, sd, null);
+
+        Assert.Equal("source (640 px).png", Path.GetFileName(output));
+        using var result = new MagickImage(output);
+        Assert.Equal((427u, 640u), (result.Width, result.Height));
+    }
+
+    [Fact]
+    public async Task ResizeLeavesImagesThatAlreadyFitAlone()
+    {
+        var source = MakePng(640, 480);
+
+        var output = await _service.ConvertAsync(source, BuiltInPresets.All.Single(p => p.Id == "resize-hd"), null);
+
+        Assert.Equal(source, output);
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(source)!));
+    }
+
+    [Fact]
+    public void ResizeIsOnlyForImages()
+    {
+        var hd = BuiltInPresets.All.Single(p => p.Id == "resize-hd");
+        Assert.True(_service.CanConvert("photo.jpg", hd));
+        Assert.False(_service.CanConvert("clip.mp4", hd));
+        Assert.False(_service.CanConvert("paper.pdf", hd));
+    }
+
     private static string PdfText(string path) => System.Text.Encoding.Latin1.GetString(File.ReadAllBytes(path));
 
     private static int PdfPageCount(string text) => Regex.Matches(text, @"/Type\s*/Page\b(?!s)").Count;

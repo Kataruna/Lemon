@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
@@ -18,8 +18,9 @@ namespace Lemon.App.Wheel;
 
 /// <summary>
 /// The round format picker that pops up under the cursor mid-drag. Drop files on a slice to convert them
-/// with that preset straight away, or on the middle to just add them to the queue. A second ring holds the
-/// Optimize strengths; hover the little button in the hub, press Tab, 1 / 2 / 3 or scroll to switch rings.
+/// with that preset straight away, or on the middle to just add them to the queue. Other rings hold the
+/// Optimize strengths, Cut out and image sizes; rest on a chip in the mode bar under the ring, press Tab, 1-4 or
+/// scroll to switch rings.
 /// </summary>
 public sealed partial class WheelWindow : Window
 {
@@ -31,13 +32,16 @@ public sealed partial class WheelWindow : Window
     private const float PopDistance = 10;
     private const int None = -2;
     private const int CenterHit = -1;
-    private const int PageButtonHit = -3;
-    private const double PageButtonWidth = 86;
-    private const double PageButtonHeight = 22;
-    // Sits in the bottom of the hub, clear of the lemon and the hub text above it.
-    private const double PageButtonTop = Center + InnerRadius - PageButtonHeight - 8;
-    /// <summary>How long the dragged files must rest on the page button before the ring turns.</summary>
-    private static readonly TimeSpan PageButtonDwell = TimeSpan.FromMilliseconds(450);
+    /// <summary>Hit codes for the mode chips: <c>ChipHit - (int)page</c>.</summary>
+    private const int ChipHit = -3;
+    private const double ChipWidth = 74;
+    private const double ChipHeight = 22;
+    private const double BarPadding = 4;
+    // The mode bar floats just under the ring, like the macOS one.
+    private const double BarTop = Diameter + 6;
+    private const double WindowHeight = BarTop + ChipHeight + 2 * BarPadding + 4;
+    /// <summary>How long the dragged files must rest on a mode chip before the ring turns to it.</summary>
+    private static readonly TimeSpan ChipDwell = TimeSpan.FromMilliseconds(450);
 
     /// <param name="Outward">Unit vector from the wheel's center through the middle of the slice.</param>
     private sealed record Slice(Path Shape, Path Glow, StackPanel Label, Vector3 Outward);
@@ -51,15 +55,16 @@ public sealed partial class WheelWindow : Window
     private TextBlock _hubText = null!;
     private FontIcon _hubIcon = null!;
     private Image _hubImage = null!;
-    private Border _pageButton = null!;
-    private TextBlock _pageButtonText = null!;
-    private FontIcon _pageButtonIcon = null!;
+    private Border _modeBar = null!;
+    private StackPanel _modeChips = null!;
+    /// <summary>The rings the chips stand for, left to right; empty when there's only one ring.</summary>
+    private WheelPage[] _chipPages = [];
 
     private IReadOnlyList<string>? _paths;
     private Task? _loading;
     private IReadOnlyList<Preset> _choices = [];
     /// <summary>The presets for each <see cref="WheelPage"/>, once the dragged files are known.</summary>
-    private IReadOnlyList<Preset>[] _pages = [[], [], []];
+    private IReadOnlyList<Preset>[] _pages = [.. Enum.GetValues<WheelPage>().Select(_ => (IReadOnlyList<Preset>)[])];
     private WheelPage _page;
     /// <summary>Where the drag was last seen, to re-check what's under it when the ring turns without a mouse move.</summary>
     private Point? _pointer;
@@ -67,13 +72,16 @@ public sealed partial class WheelWindow : Window
     private bool _dropped;
 
     private int _sizePx;
-    private double _regionFraction;
-    private EventHandler<object>? _regionTick;
+    /// <summary>Where the client area starts inside the window, past WinUI's frame.</summary>
+    private PointInt32 _clientOffset;
+    private double _openFraction;
+    private EventHandler<object>? _openTick;
     private bool _closing;
 
     public WheelWindow()
     {
         InitializeComponent();
+        SystemBackdrop = new TransparentBackdrop();
 
         var presenter = OverlappedPresenter.Create();
         presenter.IsResizable = false;
@@ -91,14 +99,20 @@ public sealed partial class WheelWindow : Window
         // Windows 11 would round the corners of the square window, fighting the circular region.
         var noRounding = Native.DWMWCP_DONOTROUND;
         Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_WINDOW_CORNER_PREFERENCE, ref noRounding, sizeof(int));
-
+        // Let DWM blend the see-through pixels with what's behind (otherwise they come out black).
+        var sheet = new Native.MARGINS { Left = -1, Right = -1, Top = -1, Bottom = -1 };
+        Native.DwmExtendFrameIntoClientArea(hwnd, ref sheet);
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.IsRepeating = false;
         _hideTimer.Tick += (_, _) => Hide();
         _pageTimer = DispatcherQueue.CreateTimer();
         _pageTimer.IsRepeating = false;
-        _pageTimer.Interval = PageButtonDwell;
-        _pageTimer.Tick += (_, _) => TurnPage(1);
+        _pageTimer.Interval = ChipDwell;
+        _pageTimer.Tick += (_, _) =>
+        {
+            if (_hover <= ChipHit)
+                GoToPage((WheelPage)(ChipHit - _hover));
+        };
 
         _compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
         ElementCompositionPreview.GetElementVisual(Ring).CenterPoint = new Vector3((float)Center, (float)Center, 0);
@@ -114,7 +128,7 @@ public sealed partial class WheelWindow : Window
     public void ShowAt(int x, int y)
     {
         _hideTimer.Stop();
-        StopRegionAnimation();
+        StopOpenAnimation();
         _closing = false;
         _paths = null;
         _loading = null;
@@ -124,7 +138,7 @@ public sealed partial class WheelWindow : Window
         _hover = None;
         _pointer = null;
         _pageTimer.Stop();
-        _pages = [[], [], []];
+        _pages = [.. Enum.GetValues<WheelPage>().Select(_ => (IReadOnlyList<Preset>)[])];
         _page = WheelPage.Convert;
         SetChoices([]);
         UpdatePageButton();
@@ -136,18 +150,28 @@ public sealed partial class WheelWindow : Window
         var scale = Native.GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
 
         _sizePx = (int)Math.Ceiling(Diameter * scale);
+        var heightPx = (int)Math.Ceiling(WindowHeight * scale);
         var work = info.WorkArea;
-        var left = Math.Clamp(x - _sizePx / 2, work.Left, Math.Max(work.Left, work.Right - _sizePx));
-        var top = Math.Clamp(y - _sizePx / 2, work.Top, Math.Max(work.Top, work.Bottom - _sizePx));
+        // Size the client area, not the window: WinUI keeps a thin frame around it even without a border, and
+        // that frame shows up white wherever the round region reaches it.
+        AppWindow.ResizeClient(new SizeInt32(_sizePx, heightPx));
+        Native.GetWindowRect(Handle, out var frame);
+        var origin = new Native.POINT();
+        Native.ClientToScreen(Handle, ref origin);
+        _clientOffset = new PointInt32(origin.X - frame.Left, origin.Y - frame.Top);
+        var outer = AppWindow.Size;
+        var left = Math.Clamp(x - _sizePx / 2 - _clientOffset.X, work.Left, Math.Max(work.Left, work.Right - outer.Width));
+        var top = Math.Clamp(y - _sizePx / 2 - _clientOffset.Y, work.Top, Math.Max(work.Top, work.Bottom - outer.Height));
 
-        AppWindow.MoveAndResize(new RectInt32(left, top, _sizePx, _sizePx));
-        SetRegion(0.3);
+        AppWindow.Move(new PointInt32(left, top));
+        SetRegion();
+        SetOpenFraction(0.3);
         AppWindow.Show(activateWindow: false);
         Native.SetWindowPos(Handle, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
         IsOpen = true;
 
         // Pop: the window grows out of the cursor while the ring springs open with a little twist.
-        AnimateRegion(0.3, 1, TimeSpan.FromMilliseconds(240), EaseOutCubic);
+        AnimateOpen(0.3, 1, TimeSpan.FromMilliseconds(240), EaseOutCubic);
         ScaleFrom(Ring, new Vector3(0.55f), Vector3.One, damping: 0.55f);
         RotateFrom(Ring, -35f, damping: 0.6f);
         RotateFrom(_hubImage, -140f, damping: 0.45f, delayMs: 60);
@@ -208,7 +232,7 @@ public sealed partial class WheelWindow : Window
         _closing = true;
 
         Spring(Ring, "Scale", new Vector3(0.8f), damping: 1f, periodMs: 30);
-        AnimateRegion(_regionFraction, 0, TimeSpan.FromMilliseconds(170), EaseInCubic, () =>
+        AnimateOpen(_openFraction, 0, TimeSpan.FromMilliseconds(170), EaseInCubic, () =>
         {
             AppWindow.Hide();
             IsOpen = false;
@@ -300,7 +324,7 @@ public sealed partial class WheelWindow : Window
         e.DragUIOverride.Caption = hit switch
         {
             >= 0 when hit < _choices.Count => (ConversionWheel.PageOf(_choices[hit]) == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
-            PageButtonHit when NextPage(1) is { } next => "Hold here for " + PageButtonName(next).ToLowerInvariant(),
+            <= ChipHit when (WheelPage)(ChipHit - hit) is var page && page != _page => "Hold here for " + PageName(page),
             CenterHit when usable => "Add to Lemon",
             _ => "",
         };
@@ -313,13 +337,12 @@ public sealed partial class WheelWindow : Window
         var hit = HitTest(e.GetPosition(Ring));
         if (hit == None || (hit >= 0 && hit >= _choices.Count))
             return;
-        // The page button sits inside the hub, so a drop on it counts as one on the hub.
-        if (hit == PageButtonHit)
+        // A drop on a mode chip just adds the files to the queue, like one on the hub.
+        if (hit <= ChipHit)
             hit = CenterHit;
 
         _dropped = true;
         _pageTimer.Stop();
-        _pageButton.Visibility = Visibility.Collapsed;
         // Last chance to read the files if no drag event managed to (only possible for a drop on the hub).
         StartLoading(e);
         if (_loading is not null)
@@ -337,12 +360,13 @@ public sealed partial class WheelWindow : Window
             Celebrate(hit);
             var files = started == 1 ? "1 file" : $"{started} files";
             var text = preset.IsOptimize ? $"Optimizing {files}"
+                : preset.IsResize ? $"Resizing {files} to {ConversionWheel.Label(preset).Title}"
                 : preset.RemoveBackground is not null ? $"Removing background from {files}"
                 : $"Converting {files} to {ConversionWheel.Label(preset).Title}";
             // In a mixed drag, files the format doesn't fit wait in the queue instead.
             if (started < paths.Count(FormatCatalog.IsSupported))
                 text += ", rest queued";
-            SetHub(text, icon: "îœ¾");
+            SetHub(text, icon: "Ã®Å“Â¾");
             ScaleFrom(_hubIcon, Vector3.Zero, Vector3.One, damping: 0.4f);
             HideAfter(TimeSpan.FromMilliseconds(950));
         }
@@ -401,16 +425,15 @@ public sealed partial class WheelWindow : Window
         Spring(_hub, "Scale", new Vector3(onHub ? 1.1f : 1f), damping: 0.4f);
         Spring(_hubContent, "Scale", new Vector3(onHub ? 1.12f : 1f), damping: 0.4f);
 
-        // Resting on the page button turns the ring, like a spring-loaded folder; leaving it before then doesn't.
-        var onPageButton = hit == PageButtonHit && !_dropped;
-        _pageButton.Background = Brush(onPageButton ? "AccentFillColorDefaultBrush" : "SubtleFillColorSecondaryBrush");
-        var foreground = Brush(onPageButton ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
-        _pageButtonText.Foreground = foreground;
-        _pageButtonIcon.Foreground = foreground;
-        Spring(_pageButton, "Scale", new Vector3(onPageButton ? 1.08f : 1f), damping: 0.4f);
-        if (onPageButton && changed)
+        // Resting on a chip turns the ring to it, like a spring-loaded folder; leaving it before then doesn't.
+        StyleChips();
+        var onChip = hit <= ChipHit && !_dropped;
+        if (onChip && changed)
+        {
+            _pageTimer.Stop();
             _pageTimer.Start();
-        else if (!onPageButton)
+        }
+        else if (!onChip)
             _pageTimer.Stop();
 
         // The lemon perks up whenever the pointer lands somewhere new.
@@ -509,41 +532,67 @@ public sealed partial class WheelWindow : Window
             ElementCompositionPreview.GetElementVisual(element).StartAnimation("Scale", pulse);
     }
 
-    /// <summary>Animates the round window shape itself, so the wheel really grows out of / shrinks into the cursor.</summary>
-    private void AnimateRegion(double from, double to, TimeSpan duration, Func<double, double> ease, Action? done = null)
+    /// <summary>Animates how far open the wheel is (0 = a dot at the cursor, 1 = full size).</summary>
+    private void AnimateOpen(double from, double to, TimeSpan duration, Func<double, double> ease, Action? done = null)
     {
-        StopRegionAnimation();
+        StopOpenAnimation();
         var start = Stopwatch.GetTimestamp();
         EventHandler<object>? tick = null;
         tick = (_, _) =>
         {
             var t = Math.Min(1, Stopwatch.GetElapsedTime(start) / duration);
-            SetRegion(from + (to - from) * ease(t));
+            SetOpenFraction(from + (to - from) * ease(t));
             if (t < 1)
                 return;
-            StopRegionAnimation();
+            StopOpenAnimation();
             done?.Invoke();
         };
-        _regionTick = tick;
+        _openTick = tick;
         CompositionTarget.Rendering += tick;
     }
 
-    private void StopRegionAnimation()
+    private void StopOpenAnimation()
     {
-        if (_regionTick is null)
+        if (_openTick is null)
             return;
-        CompositionTarget.Rendering -= _regionTick;
-        _regionTick = null;
+        CompositionTarget.Rendering -= _openTick;
+        _openTick = null;
     }
 
-    private void SetRegion(double fraction)
+    /// <summary>Scales the whole wheel, so it grows out of / shrinks into the cursor with smooth edges.</summary>
+    private void SetOpenFraction(double fraction)
     {
-        _regionFraction = fraction;
+        _openFraction = fraction;
+        var root = ElementCompositionPreview.GetElementVisual(Root);
+        root.CenterPoint = new Vector3((float)Center, (float)Center, 0);
+        root.Scale = new Vector3((float)Math.Max(0.01, fraction), (float)Math.Max(0.01, fraction), 1);
+    }
+
+    /// <summary>
+    /// Cuts the window down to the disc and the mode bar, so the transparent corners don't catch drags meant for
+    /// the windows behind. The region's edge is jagged, so it sits a little outside the drawn (anti-aliased) one.
+    /// </summary>
+    private void SetRegion()
+    {
+        var scale = _sizePx / Diameter;
         var center = _sizePx / 2.0;
-        var radius = Math.Max(1, center * fraction);
-        Native.SetWindowRgn(Handle, Native.CreateEllipticRgn(
-            (int)Math.Floor(center - radius), (int)Math.Floor(center - radius),
-            (int)Math.Ceiling(center + radius) + 1, (int)Math.Ceiling(center + radius) + 1), true);
+        var region = Native.CreateEllipticRgn(0, 0, _sizePx + 1, _sizePx + 1);
+        if (_chipPages.Length > 0)
+        {
+            var half = BarWidth / 2 * scale + 2;
+            var height = (ChipHeight + 2 * BarPadding) * scale + 4;
+            var top = BarTop * scale - 2;
+            var bar = Native.CreateRoundRectRgn(
+                (int)Math.Floor(center - half), (int)Math.Floor(top),
+                (int)Math.Ceiling(center + half) + 1, (int)Math.Ceiling(top + height) + 1,
+                (int)height, (int)height);
+            Native.CombineRgn(region, region, bar, Native.RGN_OR);
+            Native.DeleteObject(bar);
+        }
+        // Regions are in window coordinates; the shapes above are in client ones.
+        Native.OffsetRgn(region, _clientOffset.X, _clientOffset.Y);
+        // The window owns the region from here on.
+        Native.SetWindowRgn(Handle, region, true);
     }
 
     private static double EaseOutCubic(double t) => 1 - Math.Pow(1 - t, 3);
@@ -558,9 +607,12 @@ public sealed partial class WheelWindow : Window
         var dx = point.X - Center;
         var dy = point.Y - Center;
         var distance = Math.Sqrt(dx * dx + dy * dy);
-        if (_pageButton.Visibility == Visibility.Visible && Math.Abs(dx) <= PageButtonWidth / 2
-            && point.Y >= PageButtonTop && point.Y <= PageButtonTop + PageButtonHeight)
-            return PageButtonHit;
+        if (_chipPages.Length > 0 && Math.Abs(dx) <= BarWidth / 2
+            && point.Y >= BarTop && point.Y <= BarTop + ChipHeight + 2 * BarPadding)
+        {
+            var chip = (int)((point.X - (Center - BarWidth / 2) - BarPadding) / ChipWidth);
+            return ChipHit - (int)_chipPages[Math.Clamp(chip, 0, _chipPages.Length - 1)];
+        }
         if (distance <= InnerRadius)
             return CenterHit;
         // A popped-out slice reaches a bit further, so allow for it.
@@ -617,60 +669,122 @@ public sealed partial class WheelWindow : Window
         Canvas.SetZIndex(_hubContent, 2);
         Ring.Children.Add(_hubContent);
 
-        // "Switch" arrows, so it reads as "go to the other ring" rather than as another format.
-        _pageButtonIcon = new FontIcon { Glyph = "\uE8AB", FontSize = 10 };
-        _pageButtonText = new TextBlock { FontSize = 11 };
-        _pageButton = new Border
+        // One chip per ring, numbered like the 1 / 2 / 3 keys. Outside Ring, so it doesn't spin with it.
+        _modeChips = new StackPanel { Orientation = Orientation.Horizontal };
+        _modeBar = new Border
         {
-            Width = PageButtonWidth,
-            Height = PageButtonHeight,
-            CornerRadius = new CornerRadius(PageButtonHeight / 2),
-            BorderThickness = new Thickness(1),
-            BorderBrush = Brush("CardStrokeColorDefaultBrush"),
-            Background = Brush("SubtleFillColorSecondaryBrush"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, BarTop, 0, 0),
+            CornerRadius = new CornerRadius(ChipHeight / 2 + BarPadding),
+            // The window is see-through, so lay the (translucent) card color over the solid base like the disc.
+            Background = Brush("SolidBackgroundFillColorBaseBrush"),
             // Hit-testing is done by hand in HitTest; the drag events belong to the whole window.
             IsHitTestVisible = false,
             Visibility = Visibility.Collapsed,
-            Child = new StackPanel
+            Child = new Border
             {
-                Orientation = Orientation.Horizontal,
-                Spacing = 5,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
-                Children = { _pageButtonIcon, _pageButtonText },
+                Padding = new Thickness(BarPadding),
+                CornerRadius = new CornerRadius(ChipHeight / 2 + BarPadding),
+                Background = Brush("CardBackgroundFillColorDefaultBrush"),
+                Child = _modeChips,
             },
         };
-        Canvas.SetLeft(_pageButton, Center - PageButtonWidth / 2);
-        Canvas.SetTop(_pageButton, PageButtonTop);
-        Canvas.SetZIndex(_pageButton, 3);
-        ElementCompositionPreview.GetElementVisual(_pageButton).CenterPoint =
-            new Vector3((float)PageButtonWidth / 2, (float)PageButtonHeight / 2, 0);
-        Ring.Children.Add(_pageButton);
+        Root.Children.Add(_modeBar);
     }
 
-    /// <summary>Centers the lemon and hub text, nudged up when the page button needs the bottom of the hub.</summary>
     private void PlaceHubContent()
     {
-        var lift = _pageButton?.Visibility == Visibility.Visible ? 12 : 0;
-        Canvas.SetTop(_hubContent, Center - _hubContent.ActualHeight / 2 - lift);
+        Canvas.SetTop(_hubContent, Center - _hubContent.ActualHeight / 2);
         ElementCompositionPreview.GetElementVisual(_hubContent).CenterPoint =
             new Vector3((float)_hubContent.ActualWidth / 2, (float)_hubContent.ActualHeight / 2, 0);
     }
 
-    /// <summary>Shows the button only when the other ring has something on it, labeled with where it goes.</summary>
+    private double BarWidth => _chipPages.Length * ChipWidth + 2 * BarPadding;
+
+    /// <summary>Shows a chip for each ring that has something on it, or no bar when there's only one.</summary>
     private void UpdatePageButton()
     {
-        var other = NextPage(1);
-        _pageButton.Visibility = other is null ? Visibility.Collapsed : Visibility.Visible;
-        _pageButtonText.Text = other is { } page ? PageButtonName(page) : "";
-        PlaceHubContent();
+        var pages = Enum.GetValues<WheelPage>().Where(p => _pages[(int)p].Count > 0).ToArray();
+        if (pages.Length < 2)
+            pages = [];
+        if (!pages.SequenceEqual(_chipPages))
+        {
+            _chipPages = pages;
+            _modeChips.Children.Clear();
+            foreach (var page in pages)
+            {
+                var chip = new Border
+                {
+                    Width = ChipWidth,
+                    Height = ChipHeight,
+                    CornerRadius = new CornerRadius(ChipHeight / 2),
+                    Child = new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 5,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Children =
+                        {
+                            new Border
+                            {
+                                Width = 14,
+                                Height = 14,
+                                CornerRadius = new CornerRadius(4),
+                                BorderThickness = new Thickness(1),
+                                Child = new TextBlock
+                                {
+                                    Text = ((int)page + 1).ToString(),
+                                    FontSize = 9,
+                                    FontWeight = FontWeights.Bold,
+                                    HorizontalAlignment = HorizontalAlignment.Center,
+                                    VerticalAlignment = VerticalAlignment.Center,
+                                },
+                            },
+                            new TextBlock { Text = PageName(page), FontSize = 11, VerticalAlignment = VerticalAlignment.Center },
+                        },
+                    },
+                };
+                ElementCompositionPreview.GetElementVisual(chip).CenterPoint = new Vector3((float)ChipWidth / 2, (float)ChipHeight / 2, 0);
+                _modeChips.Children.Add(chip);
+            }
+            _modeBar.Visibility = pages.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            if (IsOpen)
+                SetRegion();
+        }
+        StyleChips();
     }
 
-    private static string PageButtonName(WheelPage page) => page switch
+    /// <summary>The current ring's chip is filled in; the one under the drag lights up.</summary>
+    private void StyleChips()
+    {
+        for (var i = 0; i < _chipPages.Length; i++)
+        {
+            var chip = (Border)_modeChips.Children[i];
+            var current = _chipPages[i] == _page;
+            var hot = _hover == ChipHit - (int)_chipPages[i] && !_dropped;
+            chip.Background = current ? Brush("AccentFillColorDefaultBrush")
+                : hot ? Brush("SubtleFillColorSecondaryBrush")
+                : null;
+            var foreground = Brush(current ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+            var content = (StackPanel)chip.Child;
+            var key = (Border)content.Children[0];
+            key.BorderBrush = current ? null : Brush("TextFillColorTertiaryBrush");
+            ((TextBlock)key.Child).Foreground = foreground;
+            var title = (TextBlock)content.Children[1];
+            title.Foreground = foreground;
+            title.FontWeight = current ? FontWeights.SemiBold : FontWeights.Normal;
+            Spring(chip, "Scale", new Vector3(hot ? 1.08f : 1f), damping: 0.4f);
+        }
+    }
+
+    private static string PageName(WheelPage page) => page switch
     {
         WheelPage.Optimize => "Optimize",
         WheelPage.RemoveBackground => "Cut out",
-        _ => "Formats",
+        WheelPage.Resize => "Resize",
+        _ => "Convert",
     };
 
     private void SetHub(string text, string? icon)

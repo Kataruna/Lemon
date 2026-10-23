@@ -12,6 +12,8 @@ public sealed partial class QueueViewModel : ObservableObject
     private readonly PresetStore _presets;
     private readonly ConversionService _conversion;
     private readonly Dictionary<JobViewModel, Task> _running = [];
+    /// <summary>Jobs started since the queue was last idle, for the overall progress and the "done" notification.</summary>
+    private readonly HashSet<JobViewModel> _batch = [];
 
     public QueueViewModel(AppSettings settings, PresetStore presets, ConversionService conversion)
     {
@@ -25,8 +27,16 @@ public sealed partial class QueueViewModel : ObservableObject
 
     public ObservableCollection<JobViewModel> Jobs { get; } = [];
 
-    /// <summary>A conversion ended with an error (not a cancellation).</summary>
-    public event Action<JobViewModel>? JobFailed;
+    /// <summary>Everything that was started has finished; the jobs of that batch, done, failed or canceled.</summary>
+    public event Action<IReadOnlyList<JobViewModel>>? BatchFinished;
+
+    /// <summary>How far along the running batch is, 0-1, or null when nothing is converting.</summary>
+    [ObservableProperty]
+    public partial double? BatchProgress { get; private set; }
+
+    /// <summary>e.g. "Removing background · 2 of 5 done · 40%", while a batch runs.</summary>
+    [ObservableProperty]
+    public partial string BatchStatus { get; private set; } = "";
 
     [ObservableProperty]
     public partial bool IsEmpty { get; private set; } = true;
@@ -204,7 +214,10 @@ public sealed partial class QueueViewModel : ObservableObject
     private void Enqueue(IReadOnlyList<JobViewModel> jobs)
     {
         foreach (var job in jobs.Where(j => j.SelectedPreset is not null))
+        {
             job.Status = JobStatus.Queued;
+            _batch.Add(job);
+        }
         Pump();
     }
 
@@ -215,7 +228,30 @@ public sealed partial class QueueViewModel : ObservableObject
                && Jobs.FirstOrDefault(j => j.Status == JobStatus.Queued && !_running.ContainsKey(j)) is { } job)
             _running[job] = RunAsync(job);
         IsBusy = _running.Count > 0;
+
+        if (IsBusy || _batch.Count == 0)
+            return;
+        var finished = _batch.ToList();
+        _batch.Clear();
+        BatchProgress = null;
+        BatchStatus = "";
+        BatchFinished?.Invoke(finished);
     }
+
+    private void UpdateBatchProgress()
+    {
+        var finished = _batch.Count(j => !j.IsActive);
+        var progress = _batch.Sum(j => j.IsActive ? (j.Status == JobStatus.Converting ? j.Progress : 0) : 1) / _batch.Count;
+        BatchProgress = progress;
+        BatchStatus = $"{BatchVerb(_batch)} · {finished} of {_batch.Count} done · {progress:0%}";
+    }
+
+    /// <summary>"Removing background", "Optimizing", "Resizing" or "Converting", by what every job in the batch does.</summary>
+    public static string BatchVerb(IEnumerable<JobViewModel> jobs) =>
+        jobs.All(j => j.SelectedPreset?.RemoveBackground is not null) ? "Removing background"
+        : jobs.All(j => j.SelectedPreset?.IsOptimize == true) ? "Optimizing"
+        : jobs.All(j => j.SelectedPreset?.IsResize == true) ? "Resizing"
+        : "Converting";
 
     private async Task RunAsync(JobViewModel job)
     {
@@ -263,10 +299,10 @@ public sealed partial class QueueViewModel : ObservableObject
         }
 
         var extension = FormatCatalog.NormalizeExtension(path);
-        // Optimize and Remove background are listed first but only become the default once the user picks them
+        // Optimize, Resize and Remove background are listed first but only become the default once the user picks them
         // (or they're all there is).
         return last
-            ?? presets.FirstOrDefault(p => !p.IsOptimize && p.RemoveBackground is null && FormatCatalog.NormalizeExtension(p.TargetExtension) != extension)
+            ?? presets.FirstOrDefault(p => !p.IsOptimize && !p.IsResize && p.RemoveBackground is null && FormatCatalog.NormalizeExtension(p.TargetExtension) != extension)
             ?? presets.FirstOrDefault();
     }
 
@@ -327,8 +363,8 @@ public sealed partial class QueueViewModel : ObservableObject
         if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.SelectedPreset))
             UpdateSummary();
 
-        if (e.PropertyName == nameof(JobViewModel.Status) && job.IsFailed)
-            JobFailed?.Invoke(job);
+        if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.Progress) && _batch.Contains(job))
+            UpdateBatchProgress();
     }
 
     private void UpdateSummary()

@@ -58,7 +58,10 @@ public sealed class ConversionService
     public IConverter? FindConverter(string sourcePath, Preset preset)
     {
         var from = FormatCatalog.NormalizeExtension(sourcePath);
-        var to = FormatCatalog.NormalizeExtension(preset.TargetExtension);
+        // Resize re-encodes in the source's own format, and is only offered for images.
+        if (preset.IsResize && FormatCatalog.KindOf(from) != MediaKind.Image)
+            return null;
+        var to = preset.IsResize ? from : FormatCatalog.NormalizeExtension(preset.TargetExtension);
         return Converters.FirstOrDefault(c => c.Supports(from, to) && c.Supports(from, preset)
                                               && (c.RequiredTool is not { } tool || IsInstalled(tool)));
     }
@@ -78,7 +81,8 @@ public sealed class ConversionService
 
     /// <summary>
     /// Converts one file and returns the path of the result. When optimizing doesn't find a smaller version
-    /// worth keeping, nothing is written and <paramref name="inputPath"/> itself is returned.
+    /// worth keeping, or the image already fits a Resize preset, nothing is written and <paramref name="inputPath"/>
+    /// itself is returned.
     /// </summary>
     public async Task<string> ConvertAsync(
         string inputPath,
@@ -94,10 +98,17 @@ public sealed class ConversionService
         var converter = FindConverter(inputPath, preset)
             ?? throw new ConversionException(preset.IsOptimize
                 ? $"Can't optimize {source.ToUpperInvariant()} files."
+                : preset.IsResize ? $"Can't resize {source.ToUpperInvariant()} files."
                 : $"Can't convert {source.ToUpperInvariant()} to {preset.TargetExtension.ToUpperInvariant()}.");
+
+        // Resize only ever shrinks; re-encoding an image that already fits would just cost quality.
+        if (preset.IsResize && ImageConverter.Fits(inputPath, preset))
+            return inputPath;
 
         var outputPath = preset.IsOptimize
             ? OutputPaths.Reserve(inputPath, source, outputFolder, OptimizedSuffix)
+            : preset.IsResize
+            ? OutputPaths.Reserve(inputPath, source, outputFolder, $" ({preset.MaxWidth ?? preset.MaxHeight} px)")
             : OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder, preset.RemoveBackground is null ? null : BackgroundRemovalConverter.Suffix);
         try
         {

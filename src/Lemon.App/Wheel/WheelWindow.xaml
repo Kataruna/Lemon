@@ -11,7 +11,16 @@
         DragOver="OnDragOver"
         DragLeave="OnDragLeave"
         Drop="OnDrop"
-        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
-        <Canvas x:Name="Ring" Width="320" Height="320" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        Background="Transparent">
+        <!-- The wheel's own disc, anti-aliased; the window region only trims the corners, just outside it. -->
+        <Ellipse
+            x:Name="Disc"
+            Width="316"
+            Height="316"
+            Margin="0,2,0,0"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Fill="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+        <Canvas x:Name="Ring" Width="320" Height="320" HorizontalAlignment="Center" VerticalAlignment="Top" />
     </Grid>
 </Window>

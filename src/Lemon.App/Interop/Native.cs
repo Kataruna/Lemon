@@ -184,8 +184,7 @@ internal static partial class Native
     public const long WS_EX_TOOLWINDOW = 0x80;
     public const long WS_EX_NOACTIVATE = 0x08000000;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;
-    public const int DWMWCP_DONOTROUND = 1;
-    public static readonly nint HWND_TOPMOST = -1;
+    public const int DWMWCP_DONOTROUND = 1;    public static readonly nint HWND_TOPMOST = -1;
     public const uint SWP_NOSIZE = 0x1;
     public const uint SWP_NOMOVE = 0x2;
     public const uint SWP_NOACTIVATE = 0x10;
@@ -214,6 +213,52 @@ internal static partial class Native
 
     [LibraryImport("gdi32.dll")]
     public static partial nint CreateEllipticRgn(int left, int top, int right, int bottom);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MARGINS
+    {
+        public int Left;
+        public int Right;
+        public int Top;
+        public int Bottom;
+    }
+
+    [LibraryImport("dwmapi.dll")]
+    public static partial int DwmExtendFrameIntoClientArea(nint hwnd, ref MARGINS margins);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial nint CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    public const int RGN_OR = 2;
+
+    [LibraryImport("gdi32.dll")]
+    public static partial int CombineRgn(nint destination, nint source1, nint source2, int mode);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DeleteObject(nint handle);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial int OffsetRgn(nint region, int x, int y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DispatcherQueueOptions
+    {
+        public int Size;
+        public int ThreadType;
+        public int ApartmentType;
+    }
+
+    [LibraryImport("CoreMessaging.dll")]
+    public static partial int CreateDispatcherQueueController(DispatcherQueueOptions options, out nint controller);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(nint hwnd, out RECT rect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ClientToScreen(nint hwnd, ref POINT point);
 
     [LibraryImport("user32.dll")]
     public static partial int SetWindowRgn(nint hwnd, nint region, [MarshalAs(UnmanagedType.Bool)] bool redraw);

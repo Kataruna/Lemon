@@ -47,7 +47,7 @@ internal sealed class DragGestureMonitor : IDisposable
     /// </summary>
     public event Action<int>? PageRequested;
 
-    /// <summary>1, 2 or 3 asked for a specific page. Raised on the hook thread.</summary>
+    /// <summary>A number key (1-4) asked for a specific page. Raised on the hook thread.</summary>
     public event Action<WheelPage>? PageSelected;
 
     /// <summary>
@@ -146,8 +146,8 @@ internal sealed class DragGestureMonitor : IDisposable
             if (isDown && info.VirtualKey == Native.VK_ESCAPE)
                 EscapePressed?.Invoke();
 
-            // 1 / 2 / 3 jump straight to Convert / Optimize / Cut out, only while the wheel is up mid-drag.
-            if (isDown && info.VirtualKey is >= 0x31 and <= 0x33 && IsWheelOpen?.Invoke() == true && IsLeftButtonDown())
+            // 1 / 2 / 3 / 4 jump straight to Convert / Optimize / Cut out / Resize, only while the wheel is up mid-drag.
+            if (isDown && info.VirtualKey is >= 0x31 and <= 0x34 && IsWheelOpen?.Invoke() == true && IsLeftButtonDown())
             {
                 PageSelected?.Invoke((WheelPage)(info.VirtualKey - 0x31));
                 return 1;

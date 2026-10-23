@@ -54,6 +54,18 @@ public class ConversionWheelTests
     }
 
     [Fact]
+    public void ResizeSizesGetTheirOwnRingLargestFirst()
+    {
+        IReadOnlyList<Preset> available = [Built("resize-sd"), Built("img-png"), Built("resize-fhd"), Built("optimize-smaller"), Built("resize-4k"), Built("resize-hd")];
+
+        Assert.Equal(["img-png"], ConversionWheel.Choose([available], MediaKind.Image).Select(p => p.Id));
+        Assert.Equal(["optimize-smaller"], ConversionWheel.Choose([available], MediaKind.Image, WheelPage.Optimize).Select(p => p.Id));
+        Assert.Equal(["resize-4k", "resize-fhd", "resize-hd", "resize-sd"],
+            ConversionWheel.Choose([available], MediaKind.Image, WheelPage.Resize).Select(p => p.Id));
+        Assert.Equal(("Full HD", "1920 px"), ConversionWheel.Label(Built("resize-fhd")));
+    }
+
+    [Fact]
     public void OptimizeRingOnlyOffersStrengthsEveryFileSupports()
     {
         // A video can't be optimized losslessly, so a photo + video drag only gets Balanced and Smaller.

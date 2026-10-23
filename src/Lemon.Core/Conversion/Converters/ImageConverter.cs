@@ -124,6 +124,13 @@ public sealed class ImageConverter : IConverter
         page.Density = new Density(dpi, dpi, DensityUnit.PixelsPerInch);
     }
 
+    /// <summary>Whether the image is already within the preset's maximum size.</summary>
+    public static bool Fits(string path, Preset preset)
+    {
+        var info = new MagickImageInfo(path);
+        return info.Width <= (preset.MaxWidth ?? int.MaxValue) && info.Height <= (preset.MaxHeight ?? int.MaxValue);
+    }
+
     private static void Prepare(IMagickImage<byte> image, Preset preset, MagickFormat format)
     {
         // ICO tops out at 256x256 no matter what the preset says.

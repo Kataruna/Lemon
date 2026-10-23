@@ -26,6 +26,17 @@ public sealed class BackgroundRemovalConverter : IConverter
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<BackgroundModel, int> GpuFailures = new();
     private const int MaxGpuFailures = 3;
 
+    /// <summary>
+    /// How long the last run of each model took on the GPU or CPU, to estimate progress while the next one runs
+    /// (ONNX Runtime can't report any). Until a model has run, a rough guess.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(BackgroundModel, bool), double> RunSeconds = new();
+
+    private static double ExpectedSeconds(BackgroundModel model, bool gpu) =>
+        RunSeconds.TryGetValue((model, gpu), out var seconds) ? seconds
+        : model == BackgroundModel.Lite ? (gpu ? 10 : 15)
+        : gpu ? 25 : 45;
+
     private static InferenceSession Session(BackgroundModel model, bool gpu) =>
         Sessions.GetOrAdd((model, gpu), k => new Lazy<InferenceSession>(() => OpenSession(BackgroundModelInfo.Get(k.Item1).Path, gpu))).Value;
 
@@ -56,7 +67,7 @@ public sealed class BackgroundRemovalConverter : IConverter
                     {
                         try
                         {
-                            mask = Predict(Session(model, true), image);
+                            mask = Predict(model, true, image, progress);
                             GpuFailures[model] = 0;
                         }
                         catch (OnnxRuntimeException)
@@ -70,7 +81,7 @@ public sealed class BackgroundRemovalConverter : IConverter
                         }
                     }
                 }
-                mask ??= Predict(Session(model, false), image);
+                mask ??= Predict(model, false, image, progress);
                 using var maskScope = mask;
                 cancellationToken.ThrowIfCancellationRequested();
                 mask.Resize(new MagickGeometry(image.Width, image.Height) { IgnoreAspectRatio = true });
@@ -108,28 +119,50 @@ public sealed class BackgroundRemovalConverter : IConverter
     }
 
     /// <summary>Runs the model and returns its 1024x1024 foreground mask as a grayscale image.</summary>
-    private static MagickImage Predict(InferenceSession session, MagickImage source)
+    private static MagickImage Predict(BackgroundModel model, bool gpu, MagickImage source, IProgress<double>? progress)
     {
-        // Planar CHW straight into the tensor's buffer (the 4-D indexer costs a bounds check and stride sum per value).
-        var buffer = new float[3 * Size * Size];
-        using (var small = new MagickImage(source))
-        {
-            small.Alpha(AlphaOption.Remove);
-            small.Resize(new MagickGeometry(Size, Size) { IgnoreAspectRatio = true });
-            using var pixels = small.GetPixels();
-            var data = pixels.ToByteArray(PixelMapping.RGB)!;
-            for (var c = 0; c < 3; c++)
-                for (var i = 0; i < Size * Size; i++)
-                    buffer[c * Size * Size + i] = (data[i * 3 + c] / 255f - Mean[c]) / Std[c];
-        }
-        var input = new DenseTensor<float>(buffer, [1, 3, Size, Size]);
+        var session = Session(model, gpu);
 
-        // Without arena shrinkage ONNX Runtime's CPU arena keeps growing between runs (measured on the Mac build with
-        // the same model: 6.4 GB after one run, 11 GB after two; with it, steady at about 6.5 GB).
-        using var options = new RunOptions();
-        options.AddRunConfigEntry("memory.enable_memory_arena_shrinkage", "cpu:0");
-        using var results = session.Run(
-            [NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), input)], session.OutputMetadata.Keys.ToList(), options);
+        // ONNX Runtime can't report progress, so estimate it from how long the last run took (shrinking the image
+        // included): it rises quickly at first, then slows as it nears 90%, so a run that takes longer than last
+        // time still looks alive instead of sitting full.
+        var expected = ExpectedSeconds(model, gpu);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var timer = new Timer(_ => progress?.Report(0.1 + 0.8 * (1 - Math.Exp(-2 * watch.Elapsed.TotalSeconds / expected))), null, 0, 200);
+        IDisposableReadOnlyCollection<DisposableNamedOnnxValue> results;
+        try
+        {
+            // Planar CHW straight into the tensor's buffer (the 4-D indexer costs a bounds check and stride sum per value).
+            var buffer = new float[3 * Size * Size];
+            using (var small = new MagickImage(source))
+            {
+                small.Alpha(AlphaOption.Remove);
+                small.Resize(new MagickGeometry(Size, Size) { IgnoreAspectRatio = true });
+                using var pixels = small.GetPixels();
+                var data = pixels.ToByteArray(PixelMapping.RGB)!;
+                for (var c = 0; c < 3; c++)
+                    for (var i = 0; i < Size * Size; i++)
+                        buffer[c * Size * Size + i] = (data[i * 3 + c] / 255f - Mean[c]) / Std[c];
+            }
+            var input = new DenseTensor<float>(buffer, [1, 3, Size, Size]);
+
+            // Without arena shrinkage ONNX Runtime's CPU arena keeps growing between runs (measured on the Mac build with
+            // the same model: 6.4 GB after one run, 11 GB after two; with it, steady at about 6.5 GB).
+            using var options = new RunOptions();
+            options.AddRunConfigEntry("memory.enable_memory_arena_shrinkage", "cpu:0");
+            results = session.Run(
+                [NamedOnnxValue.CreateFromTensor(session.InputMetadata.Keys.First(), input)], session.OutputMetadata.Keys.ToList(), options);
+        }
+        finally
+        {
+            // Wait for a tick in flight, so it can't land after the reports below and move the bar backwards.
+            using var stopped = new ManualResetEvent(false);
+            if (timer.Dispose(stopped))
+                stopped.WaitOne();
+        }
+        RunSeconds[(model, gpu)] = watch.Elapsed.TotalSeconds;
+        progress?.Report(0.9);
+        using var resultsScope = results;
         var output = results.First().AsTensor<float>().ToArray();
 
         // The export returns raw logits; squash them to 0..1 unless it already did.

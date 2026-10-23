@@ -47,14 +47,20 @@ public sealed record Preset
 
     /// <summary>Optimize mode: same format, smaller file, quality kept close to the original.</summary>
     [JsonIgnore]
-    public bool IsOptimize => TargetExtension == SameFormat;
+    public bool IsOptimize => TargetExtension == SameFormat && !IsResize;
+
+    /// <summary>Resize mode (images only): same format, shrunk to fit <see cref="MaxWidth"/> × <see cref="MaxHeight"/>.</summary>
+    [JsonIgnore]
+    public bool IsResize => TargetExtension == SameFormat && (MaxWidth is not null || MaxHeight is not null);
 
     [JsonIgnore]
     public MediaKind TargetKind => FormatCatalog.KindOf(TargetExtension) ?? MediaKind.Document;
 
     /// <summary>e.g. "WebP · Image · built-in", for preset lists.</summary>
     [JsonIgnore]
-    public string Summary => IsOptimize
+    public string Summary => IsResize
+        ? $"Same format, up to {MaxWidth ?? MaxHeight} px" + (IsBuiltIn ? " · built-in" : "")
+        : IsOptimize
         ? "Same format, smaller file" + (IsBuiltIn ? " · built-in" : "")
         : $"{FormatCatalog.Find(TargetExtension)?.DisplayName ?? TargetExtension.ToUpperInvariant()} · {TargetKind}" + (IsBuiltIn ? " · built-in" : "");
 }

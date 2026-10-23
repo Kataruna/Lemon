@@ -84,8 +84,8 @@ public sealed partial class JobViewModel : ObservableObject
     {
         JobStatus.Ready when SelectedPreset is null => "No converter available",
         JobStatus.Queued => "Waiting…",
-        // Optimize hands back the input itself when it couldn't find a worthwhile smaller version.
-        JobStatus.Done when OutputPath == InputPath => "Already optimized",
+        // Optimize and Resize hand back the input itself when there was nothing worth doing.
+        JobStatus.Done when OutputPath == InputPath => SelectedPreset is { IsResize: true } ? "Already small enough" : "Already optimized",
         JobStatus.Done when SelectedPreset is { IsOptimize: true } && _inputBytes > 0 =>
             $"Saved {1 - (double)_outputBytes / _inputBytes:0%} · {FormatSize(_inputBytes)} → {FormatSize(_outputBytes)}",
         JobStatus.Done => $"Saved as {Path.GetFileName(OutputPath)}",
@@ -112,10 +112,11 @@ public sealed partial class JobViewModel : ObservableObject
         Progress = 0;
         Status = JobStatus.Converting;
 
-        // Progress<T> captures the UI thread here, so reports from the worker land back on it.
+        // Progress<T> captures the UI thread here, so reports from the worker land back on it. The bar never moves
+        // back, e.g. when Remove background retries on the CPU after the GPU gives up and its estimate starts over.
         var progress = new Progress<double>(p =>
         {
-            if (Status == JobStatus.Converting)
+            if (Status == JobStatus.Converting && p > Progress)
                 Progress = p;
         });
 
