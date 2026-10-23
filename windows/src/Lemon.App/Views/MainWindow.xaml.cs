@@ -102,6 +102,7 @@ public sealed partial class MainWindow : Window
             : (args.SelectedItem as NavigationViewItem)?.Tag switch
             {
                 "presets" => typeof(PresetsPage),
+                "wheel" => typeof(WheelSettingsPage),
                 _ => typeof(ConvertPage),
             };
         if (ContentFrame.CurrentSourcePageType != page)

@@ -73,7 +73,7 @@ struct CustomRing: Codable, Hashable, Identifiable {
 /// Every preset a custom ring can hold, grouped for a menu. "PDF" is in both Images and Documents: by name it's one entry.
 func ringCandidates() -> [(String, [Preset])] {
     let custom = PrefStore.shared.p.custom
-    return [("Optimize", optimizePresets), ("Remove background", backgroundPresets)]
+    return [("Optimize", optimizePresets), ("Resize images", resizePresets), ("Remove background", backgroundPresets)]
         + Kind.allCases.map { k in (k.rawValue, (builtIn + custom).filter { $0.kind == k }) }
 }
 
@@ -340,7 +340,7 @@ struct PresetEditor: View {
 
     private var name: String { p.name.trimmingCharacters(in: .whitespaces) }
     private var taken: Bool {
-        (builtIn + optimizePresets + backgroundPresets + store.p.custom).contains { $0.name == name && $0.name != original.name }
+        (builtIn + optimizePresets + resizePresets + backgroundPresets + store.p.custom).contains { $0.name == name && $0.name != original.name }
     }
 
     var body: some View {

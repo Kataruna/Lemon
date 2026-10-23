@@ -1,6 +1,7 @@
 import Foundation
 import CoreImage
 import Vision
+import ImageIO
 
 struct LemonError: Error { let message: String }
 
@@ -96,7 +97,7 @@ final class Meter: @unchecked Sendable {
     }
 }
 
-enum Outcome { case done(URL), alreadyOptimized }
+enum Outcome { case done(URL), alreadyOptimized, alreadySmall }
 
 /// Moves the result to name.ext, or name (1).ext, ... – never overwrites. FileManager.moveItem checks then renames, so
 /// two parallel jobs that want the same name can both pass the check and one silently replaces the other (seen in
@@ -130,8 +131,11 @@ let sharedCIContext = CIContext()
 func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double?) -> Void) async throws -> Outcome {
     let fm = FileManager.default
     let srcExt = ext(of: src), optimize = preset.strength != nil
-    let outExt = optimize ? srcExt : preset.ext
-    let suffix = optimize ? " (optimized)" : preset.removeBackground != nil ? " (no background)" : ""
+    let outExt = optimize || preset.isResize ? srcExt : preset.ext
+    let suffix = optimize ? " (optimized)" : preset.removeBackground != nil ? " (no background)"
+        : preset.isResize ? " (\(preset.maxWidth ?? preset.maxHeight ?? 0) px)" : ""
+    // Resize only ever shrinks; re-encoding an image that already fits would just cost quality.
+    if preset.isResize, fits(src, preset) { return .alreadySmall }
     let dir = src.deletingLastPathComponent()
     let scratch = scratchFolder(near: dir)
     let tmp = scratch.appendingPathComponent("lemon-\(UUID().uuidString).\(outExt)")
@@ -162,7 +166,7 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
         try Task.checkCancellation()
     } else {
         switch kindOf[srcExt]! {
-        case .image: try await imageConvert(src, tmp, preset, progress)
+        case .image: try await imageConvert(src, tmp, preset, outExt, progress)
         case .audio, .video: try await ffmpegConvert(src, tmp, preset, progress)
         case .document: try await docConvert(src, tmp, srcExt, preset.ext)
         }
@@ -195,11 +199,20 @@ private func runMagick(_ m: String, _ args: [String], _ progress: @escaping @Sen
     })
 }
 
-private func imageConvert(_ src: URL, _ dst: URL, _ p: Preset, _ progress: @escaping @Sendable (Double?) -> Void) async throws {
+/// Whether an image is already within a Resize preset's size. False when its size can't be read: then it's converted.
+private func fits(_ src: URL, _ p: Preset) -> Bool {
+    guard let source = CGImageSourceCreateWithURL(src as CFURL, nil),
+          let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+          let w = props[kCGImagePropertyPixelWidth] as? Int, let h = props[kCGImagePropertyPixelHeight] as? Int else { return false }
+    return w <= (p.maxWidth ?? .max) && h <= (p.maxHeight ?? .max)
+}
+
+/// outExt is the format to write: the preset's, or for Resize the source's own.
+private func imageConvert(_ src: URL, _ dst: URL, _ p: Preset, _ outExt: String, _ progress: @escaping @Sendable (Double?) -> Void) async throws {
     let m = try Tools.need("magick")
-    let multi = ["gif", "webp", "pdf", "tiff"].contains(p.ext)   // formats that keep animation / pages
+    let multi = ["gif", "webp", "pdf", "tiff", "tif"].contains(outExt)   // formats that keep animation / pages
     var a = [multi ? src.path : src.path + "[0]", "-auto-orient"]
-    if p.ext == "jpg" || p.ext == "bmp" { a += ["-background", "white", "-alpha", "remove", "-alpha", "off"] }
+    if outExt == "jpg" || outExt == "jpeg" || outExt == "bmp" { a += ["-background", "white", "-alpha", "remove", "-alpha", "off"] }
     if p.strip { a.append("-strip") }
     if let w = p.maxWidth, let h = p.maxHeight { a += ["-resize", "\(w)x\(h)>"] }
     if let q = p.quality { a += ["-quality", "\(q)"] }

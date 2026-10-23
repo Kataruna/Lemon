@@ -17,7 +17,7 @@ let kindOf: [String: Kind] = {
 struct Preset: Identifiable, Hashable, Codable {
     var id: String { name }
     var name: String
-    let ext: String            // "" = Optimize (same format as the source)
+    let ext: String            // "" = the source's own format: Optimize (with a strength) or Resize
     let kind: Kind
     var strength: Strength? = nil
     var quality: Int? = nil
@@ -28,6 +28,8 @@ struct Preset: Identifiable, Hashable, Codable {
     var fps: Int? = nil
     var strip = false
     var removeBackground: BGEngine? = nil   // always writes a transparent PNG
+    /// Resize: shrinks an image to fit maxWidth x maxHeight in its own format.
+    var isResize: Bool { ext.isEmpty && strength == nil }
 }
 
 private func p(_ name: String, _ ext: String, _ kind: Kind, _ f: (inout Preset) -> Void = { _ in }) -> Preset {
@@ -58,6 +60,11 @@ let builtIn: [Preset] = [
 
 let optimizePresets: [Preset] = [Strength.lossless, .balanced, .smaller].map {
     Preset(name: "Optimize – \($0.rawValue)", ext: "", kind: .image, strength: $0)
+}
+
+/// Image sizes by the long edge, so portrait photos shrink the same way as landscape ones. Same as the Windows build.
+let resizePresets: [Preset] = [("4K", 3840), ("Full HD", 1920), ("HD", 1280), ("SD", 640)].map {
+    Preset(name: "Resize – \($0.0)", ext: "", kind: .image, maxWidth: $0.1, maxHeight: $0.1)
 }
 
 let backgroundPresets = [
@@ -100,6 +107,7 @@ func presets(for url: URL) -> [Preset] {
     out += PrefStore.shared.p.custom.filter { c in out.contains { $0.kind == c.kind && $0.ext == c.ext } || (canSame && c.kind == kind && c.ext == same) }
     // BiRefNet presets stay hidden until their model is downloaded.
     if kind == .image { out += backgroundPresets.filter { BiRefNet.of($0.removeBackground!)?.installed ?? true } }
+    if kind == .image, has("magick") { out += resizePresets }
     if optimizable(src) { out = optimizePresets.filter { $0.strength != .lossless || ["png", "gif"].contains(src) } + out }
     return out
 }

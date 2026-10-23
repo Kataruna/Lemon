@@ -12,6 +12,14 @@
         DragLeave="OnDragLeave"
         Drop="OnDrop"
         Background="Transparent">
+        <!-- The blurred picture of what's behind the wheel (see Glass), under the tinted disc. -->
+        <Ellipse
+            x:Name="Frost"
+            Width="316"
+            Height="316"
+            Margin="0,2,0,0"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top" />
         <!-- The wheel's own disc, anti-aliased; the window region only trims the corners, just outside it. -->
         <Ellipse
             x:Name="Disc"

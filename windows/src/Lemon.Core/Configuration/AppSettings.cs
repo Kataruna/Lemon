@@ -25,6 +25,9 @@ public sealed class AppSettings
     /// <summary>Whether the "Lemon is still running" notice has been shown after the first close.</summary>
     public bool TrayNoticeShown { get; set; }
 
+    /// <summary>The conversion wheel's look and rings.</summary>
+    public WheelSettings Wheel { get; set; } = new();
+
     public static string DefaultPath { get; } = Path.Combine(JsonFileStore.DefaultDirectory, "settings.json");
 
     public static AppSettings Load(string? path = null) => JsonFileStore.Load<AppSettings>(path ?? DefaultPath) ?? new();

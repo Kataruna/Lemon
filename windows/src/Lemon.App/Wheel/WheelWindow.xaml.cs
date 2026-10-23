@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Dispatching;
@@ -19,28 +19,31 @@ namespace Lemon.App.Wheel;
 /// <summary>
 /// The round format picker that pops up under the cursor mid-drag. Drop files on a slice to convert them
 /// with that preset straight away, or on the middle to just add them to the queue. Other rings hold the
-/// Optimize strengths, Cut out and image sizes; rest on a chip in the mode bar under the ring, press Tab, 1-4 or
-/// scroll to switch rings.
+/// Optimize strengths, Cut out, image sizes and the user's own rings; rest on a chip in the mode bar under the
+/// ring, press Tab, a number key or scroll to switch rings. With more rings than fit on the bar (or when the user
+/// asks for it) there's a hub, where the rings themselves are the slices.
 /// </summary>
 public sealed partial class WheelWindow : Window
 {
-    private const double Diameter = 320;
-    private const double Center = Diameter / 2;
+    internal const double Diameter = 320;
+    internal const double Center = Diameter / 2;
     // Leaves room inside the round window for a hovered slice to pop outward.
-    private const double OuterRadius = 146;
-    private const double InnerRadius = 60;
-    private const float PopDistance = 10;
+    internal const double OuterRadius = 146;
+    internal const double InnerRadius = 60;
+    internal const float PopDistance = 10;
     private const int None = -2;
     private const int CenterHit = -1;
-    /// <summary>Hit codes for the mode chips: <c>ChipHit - (int)page</c>.</summary>
+    /// <summary>Hit codes for the mode chips: <c>ChipHit - chip index</c>.</summary>
     private const int ChipHit = -3;
-    private const double ChipWidth = 74;
-    private const double ChipHeight = 22;
-    private const double BarPadding = 4;
+    /// <summary>A chip's target that means the hub rather than a ring.</summary>
+    private const int HubTarget = -1;
+    internal const double ChipWidth = 74;
+    internal const double ChipHeight = 22;
+    internal const double BarPadding = 4;
     // The mode bar floats just under the ring, like the macOS one.
-    private const double BarTop = Diameter + 6;
-    private const double WindowHeight = BarTop + ChipHeight + 2 * BarPadding + 4;
-    /// <summary>How long the dragged files must rest on a mode chip before the ring turns to it.</summary>
+    internal const double BarTop = Diameter + 6;
+    internal const double WindowHeight = BarTop + ChipHeight + 2 * BarPadding + 4;
+    /// <summary>How long the dragged files must rest on a mode chip (or a ring on the hub) before the ring turns to it.</summary>
     private static readonly TimeSpan ChipDwell = TimeSpan.FromMilliseconds(450);
 
     /// <param name="Outward">Unit vector from the wheel's center through the middle of the slice.</param>
@@ -55,17 +58,28 @@ public sealed partial class WheelWindow : Window
     private TextBlock _hubText = null!;
     private FontIcon _hubIcon = null!;
     private Image _hubImage = null!;
+    private TextBlock _hubEmoji = null!;
+    private Ellipse _outline = null!;
     private Border _modeBar = null!;
+    private Border _barTint = null!;
     private StackPanel _modeChips = null!;
-    /// <summary>The rings the chips stand for, left to right; empty when there's only one ring.</summary>
-    private WheelPage[] _chipPages = [];
+    /// <summary>The blurred picture of what's behind the wheel, while it's open with blur on.</summary>
+    private ImageMagick.MagickImage? _glass;
+    /// <summary>Counts openings, so a blur that finishes after the wheel moved on is thrown away.</summary>
+    private int _openCount;
+    private double _scale = 1;
+    /// <summary>What each chip leads to, left to right: a ring index, or <see cref="HubTarget"/>.</summary>
+    private int[] _chips = [];
+    private WheelLook _look = null!;
 
     private IReadOnlyList<string>? _paths;
     private Task? _loading;
     private IReadOnlyList<Preset> _choices = [];
-    /// <summary>The presets for each <see cref="WheelPage"/>, once the dragged files are known.</summary>
-    private IReadOnlyList<Preset>[] _pages = [.. Enum.GetValues<WheelPage>().Select(_ => (IReadOnlyList<Preset>)[])];
-    private WheelPage _page;
+    /// <summary>The rings for the dragged files and their presets, once the files are known.</summary>
+    private WheelPlan _plan = WheelPlan.Empty;
+    private int _ring;
+    /// <summary>On the hub, the slices are the rings and resting on one opens it.</summary>
+    private bool _inHub;
     /// <summary>Where the drag was last seen, to re-check what's under it when the ring turns without a mouse move.</summary>
     private Point? _pointer;
     private int _hover = None;
@@ -110,8 +124,10 @@ public sealed partial class WheelWindow : Window
         _pageTimer.Interval = ChipDwell;
         _pageTimer.Tick += (_, _) =>
         {
-            if (_hover <= ChipHit)
-                GoToPage((WheelPage)(ChipHit - _hover));
+            if (_hover <= ChipHit && _chips.ElementAtOrDefault(ChipHit - _hover) is var target)
+                GoTo(target, target == HubTarget || target > _ring ? 1 : -1);
+            else if (_inHub && _hover >= 0)
+                GoTo(_hover, 1);
         };
 
         _compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
@@ -138,9 +154,11 @@ public sealed partial class WheelWindow : Window
         _hover = None;
         _pointer = null;
         _pageTimer.Stop();
-        _pages = [.. Enum.GetValues<WheelPage>().Select(_ => (IReadOnlyList<Preset>)[])];
-        _page = WheelPage.Convert;
-        SetChoices([]);
+        _plan = WheelPlan.Empty;
+        _ring = 0;
+        _inHub = false;
+        ApplyLook();
+        ShowSlices();
         UpdatePageButton();
         SetHub("Drop on a format", icon: null);
 
@@ -149,6 +167,7 @@ public sealed partial class WheelWindow : Window
         Native.GetMonitorInfo(monitor, ref info);
         var scale = Native.GetDpiForMonitor(monitor, 0, out var dpi, out _) == 0 ? dpi / 96.0 : 1.0;
 
+        _scale = scale;
         _sizePx = (int)Math.Ceiling(Diameter * scale);
         var heightPx = (int)Math.Ceiling(WindowHeight * scale);
         var work = info.WorkArea;
@@ -164,6 +183,8 @@ public sealed partial class WheelWindow : Window
         var top = Math.Clamp(y - _sizePx / 2 - _clientOffset.Y, work.Top, Math.Max(work.Top, work.Bottom - outer.Height));
 
         AppWindow.Move(new PointInt32(left, top));
+        // Before showing, so the snapshot is of what's behind the wheel rather than the wheel itself.
+        StartGlass(left + _clientOffset.X, top + _clientOffset.Y, _sizePx, heightPx);
         SetRegion();
         SetOpenFraction(0.3);
         AppWindow.Show(activateWindow: false);
@@ -174,7 +195,7 @@ public sealed partial class WheelWindow : Window
         AnimateOpen(0.3, 1, TimeSpan.FromMilliseconds(240), EaseOutCubic);
         ScaleFrom(Ring, new Vector3(0.55f), Vector3.One, damping: 0.55f);
         RotateFrom(Ring, -35f, damping: 0.6f);
-        RotateFrom(_hubImage, -140f, damping: 0.45f, delayMs: 60);
+        RotateFrom(Mascot, -140f, damping: 0.45f, delayMs: 60);
     }
 
     /// <summary>The drag ended. Give a drop on us a moment to arrive (it's processed after the release), then hide.</summary>
@@ -184,40 +205,38 @@ public sealed partial class WheelWindow : Window
             HideAfter(TimeSpan.FromMilliseconds(400));
     }
 
-    /// <summary>Moves to the next (or previous) ring that has something on it, wrapping around.</summary>
-    /// <param name="step">+1 for forward (Tab, scroll down, the page button), -1 for back; sets the spin direction.</param>
+    /// <summary>Moves to the next (or previous) ring, wrapping around; from the hub, to the first (or last) one.</summary>
+    /// <param name="step">+1 for forward (Tab, scroll down), -1 for back; sets the spin direction.</param>
     public void TurnPage(int step)
     {
-        if (NextPage(step) is { } next)
-            GoToPage(next, step);
+        var count = _plan.Rings.Count;
+        if (count > 1)
+            GoTo(_inHub ? (step >= 0 ? 0 : count - 1) : (_ring + step + count) % count, step);
     }
 
-    /// <summary>Jumps straight to a ring (the 1 / 2 / 3 keys), if it has something on it.</summary>
-    public void GoToPage(WheelPage page) => GoToPage(page, page > _page ? 1 : -1);
+    /// <summary>A number key: 1-9 jump to that ring, 0 to the hub.</summary>
+    public void GoToNumber(int number) => GoTo(number == 0 ? HubTarget : number - 1, number == 0 || number - 1 > _ring ? 1 : -1);
 
-    private void GoToPage(WheelPage next, int step)
+    /// <param name="target">A ring index, or <see cref="HubTarget"/>.</param>
+    private void GoTo(int target, int step)
     {
         _pageTimer.Stop();
-        if (!IsOpen || _closing || _dropped || next == _page || _pages[(int)next].Count == 0)
+        if (!IsOpen || _closing || _dropped)
+            return;
+        if (target == HubTarget ? !_plan.HubOn || _inHub : target < 0 || target >= _plan.Rings.Count || (!_inHub && target == _ring))
             return;
 
-        _page = next;
-        SetChoices(_pages[(int)_page], animate: true);
+        _inHub = target == HubTarget;
+        if (!_inHub)
+            _ring = target;
+        ShowSlices(animate: true);
         RotateFrom(Ring, step >= 0 ? -30f : 30f, damping: 0.6f);
         UpdatePageButton();
-        // The pointer may not move after Tab or a scroll, so work out what's under it on the new ring.
+        // The pointer may not move after Tab or a scroll, so work out what's under it on the new ring. Only moving onto
+        // something counts as resting there: otherwise a chip that turns up under a still pointer (e.g. "All rings"
+        // after leaving the hub) would switch straight back.
         UpdateHover(_pointer is { } point ? HitTest(point) : None, force: true);
-    }
-
-    private WheelPage? NextPage(int step)
-    {
-        for (var i = 1; i < _pages.Length; i++)
-        {
-            var candidate = (WheelPage)(((int)_page + (step >= 0 ? i : -i) + _pages.Length * 2) % _pages.Length);
-            if (_pages[(int)candidate].Count > 0)
-                return candidate;
-        }
-        return null;
+        _pageTimer.Stop();
     }
 
     /// <summary>Shrinks the wheel back into its center, then hides the window.</summary>
@@ -289,14 +308,15 @@ public sealed partial class WheelWindow : Window
 
         try
         {
-            _pages = Enum.GetValues<WheelPage>().Select(page => WheelChoices(_paths, page)).ToArray();
-            // Files that can only be optimized (e.g. PDFs) open straight on the first ring that has something.
-            _page = (WheelPage)Math.Max(0, Array.FindIndex(_pages, p => p.Count > 0));
-            SetChoices(_pages[(int)_page], animate: true);
+            // Only rings with something for these files, so e.g. PDFs (which can only be optimized) open on Optimize.
+            _plan = Plan(_paths);
+            _ring = _plan.Start;
+            _inHub = _plan.OpensOnHub;
+            ShowSlices(animate: true);
             UpdatePageButton();
             SetHub(
                 _paths.Count == 0 ? "Lemon can't convert these"
-                : _choices.Count == 0 ? "Mixed file types: add to queue"
+                : _plan.Rings.Count == 0 ? "Mixed file types: add to queue"
                 : "Add to queue",
                 icon: null);
             UpdateHover(_pointer is { } point ? HitTest(point) : _hover, force: true);
@@ -319,12 +339,16 @@ public sealed partial class WheelWindow : Window
         var hit = HitTest(_pointer.Value);
         UpdateHover(hit);
         var usable = _paths is null || _paths.Count > 0;
-        e.AcceptedOperation = hit != None && usable ? DataPackageOperation.Copy : DataPackageOperation.None;
+        // A ring on the hub isn't somewhere to drop, only to rest on.
+        var drops = hit != None && !(_inHub && hit >= 0);
+        e.AcceptedOperation = drops && usable ? DataPackageOperation.Copy : DataPackageOperation.None;
         e.DragUIOverride.IsGlyphVisible = false;
         e.DragUIOverride.Caption = hit switch
         {
-            >= 0 when hit < _choices.Count => (ConversionWheel.PageOf(_choices[hit]) == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
-            <= ChipHit when (WheelPage)(ChipHit - hit) is var page && page != _page => "Hold here for " + PageName(page),
+            >= 0 when _inHub && hit < _plan.Rings.Count => "Hold here for " + _plan.Rings[hit].Name,
+            >= 0 when hit < _choices.Count => (_plan.Rings[_ring].Page == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
+            <= ChipHit when _chips.ElementAtOrDefault(ChipHit - hit) is var target && (target == HubTarget || target != _ring) =>
+                "Hold here for " + (target == HubTarget ? "all rings" : _plan.Rings[target].Name),
             CenterHit when usable => "Add to Lemon",
             _ => "",
         };
@@ -335,7 +359,7 @@ public sealed partial class WheelWindow : Window
     private async void OnDrop(object sender, DragEventArgs e)
     {
         var hit = HitTest(e.GetPosition(Ring));
-        if (hit == None || (hit >= 0 && hit >= _choices.Count))
+        if (hit == None || (hit >= 0 && (_inHub || hit >= _choices.Count)))
             return;
         // A drop on a mode chip just adds the files to the queue, like one on the hub.
         if (hit <= ChipHit)
@@ -366,7 +390,7 @@ public sealed partial class WheelWindow : Window
             // In a mixed drag, files the format doesn't fit wait in the queue instead.
             if (started < paths.Count(FormatCatalog.IsSupported))
                 text += ", rest queued";
-            SetHub(text, icon: "Ã®Å“Â¾");
+            SetHub(text, icon: "");
             ScaleFrom(_hubIcon, Vector3.Zero, Vector3.One, damping: 0.4f);
             HideAfter(TimeSpan.FromMilliseconds(950));
         }
@@ -382,11 +406,11 @@ public sealed partial class WheelWindow : Window
         }
     }
 
-    private static IReadOnlyList<Preset> WheelChoices(IReadOnlyList<string> paths, WheelPage page)
+    private static WheelPlan Plan(IReadOnlyList<string> paths)
     {
         var supported = paths.Where(FormatCatalog.IsSupported).ToList();
         if (supported.Count == 0)
-            return [];
+            return WheelPlan.Empty;
 
         // Presets depend only on the file type, so check one file per extension.
         var perType = supported
@@ -394,7 +418,7 @@ public sealed partial class WheelWindow : Window
             .Select(g => (FormatCatalog.KindOf(g.Key)!.Value, App.Queue.PresetsFor(g.First())))
             .ToList();
         var kind = supported.GroupBy(p => FormatCatalog.KindOf(p)!.Value).MaxBy(g => g.Count())!.Key;
-        return ConversionWheel.ChooseByKind(perType, kind, page);
+        return ConversionWheel.Plan(perType, kind, App.Settings.Wheel);
     }
 
     // ---- Hover and celebration ----
@@ -416,8 +440,8 @@ public sealed partial class WheelWindow : Window
             Spring(slice.Glow, "Translation", pop);
             Spring(slice.Label, "Translation", on ? slice.Outward * (PopDistance + 4) : Vector3.Zero);
             Spring(slice.Label, "Scale", new Vector3(on ? 1.16f : 1f));
-            foreach (var text in slice.Label.Children.OfType<TextBlock>())
-                text.Foreground = Brush(on ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+            foreach (var text in slice.Label.Children.OfType<FrameworkElement>())
+                Recolor(text, on ? _look.OnAccent : _look.Text);
         }
 
         var onHub = hit == CenterHit && !_dropped;
@@ -425,9 +449,9 @@ public sealed partial class WheelWindow : Window
         Spring(_hub, "Scale", new Vector3(onHub ? 1.1f : 1f), damping: 0.4f);
         Spring(_hubContent, "Scale", new Vector3(onHub ? 1.12f : 1f), damping: 0.4f);
 
-        // Resting on a chip turns the ring to it, like a spring-loaded folder; leaving it before then doesn't.
+        // Resting on a chip (or a ring on the hub) turns to it, like a spring-loaded folder; leaving it before then doesn't.
         StyleChips();
-        var onChip = hit <= ChipHit && !_dropped;
+        var onChip = (hit <= ChipHit || (_inHub && hit >= 0)) && !_dropped;
         if (onChip && changed)
         {
             _pageTimer.Stop();
@@ -438,7 +462,7 @@ public sealed partial class WheelWindow : Window
 
         // The lemon perks up whenever the pointer lands somewhere new.
         if (changed && hit != None && !_dropped)
-            Wiggle(_hubImage);
+            Wiggle(Mascot);
     }
 
     /// <summary>The chosen slice does a happy bounce while the others step back.</summary>
@@ -577,7 +601,7 @@ public sealed partial class WheelWindow : Window
         var scale = _sizePx / Diameter;
         var center = _sizePx / 2.0;
         var region = Native.CreateEllipticRgn(0, 0, _sizePx + 1, _sizePx + 1);
-        if (_chipPages.Length > 0)
+        if (_chips.Length > 0)
         {
             var half = BarWidth / 2 * scale + 2;
             var height = (ChipHeight + 2 * BarPadding) * scale + 4;
@@ -607,12 +631,9 @@ public sealed partial class WheelWindow : Window
         var dx = point.X - Center;
         var dy = point.Y - Center;
         var distance = Math.Sqrt(dx * dx + dy * dy);
-        if (_chipPages.Length > 0 && Math.Abs(dx) <= BarWidth / 2
+        if (_chips.Length > 0 && Math.Abs(dx) <= BarWidth / 2
             && point.Y >= BarTop && point.Y <= BarTop + ChipHeight + 2 * BarPadding)
-        {
-            var chip = (int)((point.X - (Center - BarWidth / 2) - BarPadding) / ChipWidth);
-            return ChipHit - (int)_chipPages[Math.Clamp(chip, 0, _chipPages.Length - 1)];
-        }
+            return ChipHit - Math.Clamp((int)((point.X - (Center - BarWidth / 2) - BarPadding) / ChipWidth), 0, _chips.Length - 1);
         if (distance <= InnerRadius)
             return CenterHit;
         // A popped-out slice reaches a bit further, so allow for it.
@@ -628,14 +649,14 @@ public sealed partial class WheelWindow : Window
 
     private void BuildHub()
     {
-        Ring.Children.Add(new Ellipse
+        _outline = new Ellipse
         {
             Width = OuterRadius * 2 + 6,
             Height = OuterRadius * 2 + 6,
-            Stroke = Brush("AccentFillColorDefaultBrush"),
             StrokeThickness = 3,
             Margin = new Thickness(Center - OuterRadius - 3, Center - OuterRadius - 3, 0, 0),
-        });
+        };
+        Ring.Children.Add(_outline);
 
         _hub = new Ellipse
         {
@@ -663,25 +684,21 @@ public sealed partial class WheelWindow : Window
             MaxWidth = InnerRadius * 2 - 20,
             Foreground = Brush("TextFillColorSecondaryBrush"),
         };
-        _hubContent = new StackPanel { Width = InnerRadius * 2, Spacing = 4, Children = { _hubImage, _hubIcon, _hubText } };
+        _hubEmoji = new TextBlock { FontSize = 28, Height = 36, FontFamily = new FontFamily("Segoe UI Emoji"), HorizontalAlignment = HorizontalAlignment.Center };
+        _hubEmoji.SizeChanged += (_, _) => ElementCompositionPreview.GetElementVisual(_hubEmoji).CenterPoint =
+            new Vector3((float)_hubEmoji.ActualWidth / 2, (float)_hubEmoji.ActualHeight / 2, 0);
+        _hubContent = new StackPanel { Width = InnerRadius * 2, Spacing = 4, Children = { _hubImage, _hubEmoji, _hubIcon, _hubText } };
         _hubContent.SizeChanged += (_, _) => PlaceHubContent();
         Canvas.SetLeft(_hubContent, Center - InnerRadius);
         Canvas.SetZIndex(_hubContent, 2);
         Ring.Children.Add(_hubContent);
 
-        // One chip per ring, numbered like the 1 / 2 / 3 keys. Outside Ring, so it doesn't spin with it.
+        // One chip per ring, numbered like the number keys. Outside Ring, so it doesn't spin with it.
         _modeChips = new StackPanel { Orientation = Orientation.Horizontal };
-        _modeBar = new Border
+        // Glass like the disc's: the blurred picture, the tint over it, then the (translucent) card color.
+        _barTint = new Border
         {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, BarTop, 0, 0),
             CornerRadius = new CornerRadius(ChipHeight / 2 + BarPadding),
-            // The window is see-through, so lay the (translucent) card color over the solid base like the disc.
-            Background = Brush("SolidBackgroundFillColorBaseBrush"),
-            // Hit-testing is done by hand in HitTest; the drag events belong to the whole window.
-            IsHitTestVisible = false,
-            Visibility = Visibility.Collapsed,
             Child = new Border
             {
                 Padding = new Thickness(BarPadding),
@@ -689,6 +706,17 @@ public sealed partial class WheelWindow : Window
                 Background = Brush("CardBackgroundFillColorDefaultBrush"),
                 Child = _modeChips,
             },
+        };
+        _modeBar = new Border
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(0, BarTop, 0, 0),
+            CornerRadius = new CornerRadius(ChipHeight / 2 + BarPadding),
+            // Hit-testing is done by hand in HitTest; the drag events belong to the whole window.
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed,
+            Child = _barTint,
         };
         Root.Children.Add(_modeBar);
     }
@@ -700,19 +728,20 @@ public sealed partial class WheelWindow : Window
             new Vector3((float)_hubContent.ActualWidth / 2, (float)_hubContent.ActualHeight / 2, 0);
     }
 
-    private double BarWidth => _chipPages.Length * ChipWidth + 2 * BarPadding;
+    private double BarWidth => _chips.Length * ChipWidth + 2 * BarPadding;
 
-    /// <summary>Shows a chip for each ring that has something on it, or no bar when there's only one.</summary>
+    /// <summary>
+    /// Shows a chip for each ring, or with the hub on a single one back to it (none on the hub itself), or no bar
+    /// when there's only one ring.
+    /// </summary>
     private void UpdatePageButton()
     {
-        var pages = Enum.GetValues<WheelPage>().Where(p => _pages[(int)p].Count > 0).ToArray();
-        if (pages.Length < 2)
-            pages = [];
-        if (!pages.SequenceEqual(_chipPages))
+        int[] chips = _plan.Rings.Count < 2 || _inHub ? [] : _plan.HubOn ? [HubTarget] : [.. Enumerable.Range(0, _plan.Rings.Count)];
+        if (!chips.SequenceEqual(_chips))
         {
-            _chipPages = pages;
+            _chips = chips;
             _modeChips.Children.Clear();
-            foreach (var page in pages)
+            foreach (var target in chips)
             {
                 var chip = new Border
                 {
@@ -735,21 +764,29 @@ public sealed partial class WheelWindow : Window
                                 BorderThickness = new Thickness(1),
                                 Child = new TextBlock
                                 {
-                                    Text = ((int)page + 1).ToString(),
+                                    Text = target == HubTarget ? "0" : (target + 1).ToString(),
                                     FontSize = 9,
                                     FontWeight = FontWeights.Bold,
                                     HorizontalAlignment = HorizontalAlignment.Center,
                                     VerticalAlignment = VerticalAlignment.Center,
                                 },
                             },
-                            new TextBlock { Text = PageName(page), FontSize = 11, VerticalAlignment = VerticalAlignment.Center },
+                            new TextBlock
+                            {
+                                Text = target == HubTarget ? "All rings" : _plan.Rings[target].Name,
+                                FontSize = 11,
+                                MaxWidth = ChipWidth - 26,
+                                TextTrimming = TextTrimming.CharacterEllipsis,
+                                VerticalAlignment = VerticalAlignment.Center,
+                            },
                         },
                     },
                 };
                 ElementCompositionPreview.GetElementVisual(chip).CenterPoint = new Vector3((float)ChipWidth / 2, (float)ChipHeight / 2, 0);
                 _modeChips.Children.Add(chip);
             }
-            _modeBar.Visibility = pages.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            _modeBar.Visibility = chips.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            UpdateBarGlass();
             if (IsOpen)
                 SetRegion();
         }
@@ -759,15 +796,15 @@ public sealed partial class WheelWindow : Window
     /// <summary>The current ring's chip is filled in; the one under the drag lights up.</summary>
     private void StyleChips()
     {
-        for (var i = 0; i < _chipPages.Length; i++)
+        for (var i = 0; i < _chips.Length; i++)
         {
             var chip = (Border)_modeChips.Children[i];
-            var current = _chipPages[i] == _page;
-            var hot = _hover == ChipHit - (int)_chipPages[i] && !_dropped;
-            chip.Background = current ? Brush("AccentFillColorDefaultBrush")
+            var current = !_inHub && _chips[i] == _ring;
+            var hot = _hover == ChipHit - i && !_dropped;
+            chip.Background = current ? _look.Highlight
                 : hot ? Brush("SubtleFillColorSecondaryBrush")
                 : null;
-            var foreground = Brush(current ? "TextOnAccentFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+            var foreground = current ? _look.OnAccent : _look.Text;
             var content = (StackPanel)chip.Child;
             var key = (Border)content.Children[0];
             key.BorderBrush = current ? null : Brush("TextFillColorTertiaryBrush");
@@ -779,24 +816,93 @@ public sealed partial class WheelWindow : Window
         }
     }
 
-    private static string PageName(WheelPage page) => page switch
+    /// <summary>Lemon's lemon picture, or the emoji chosen in Settings in its place.</summary>
+    private FrameworkElement Mascot => _look.UsesLemonPicture ? _hubImage : _hubEmoji;
+
+    /// <summary>Picks up the look from Settings › Wheel (and the current light / dark theme) each time the wheel opens.</summary>
+    private void ApplyLook()
     {
-        WheelPage.Optimize => "Optimize",
-        WheelPage.RemoveBackground => "Cut out",
-        WheelPage.Resize => "Resize",
-        _ => "Convert",
-    };
+        _look = WheelLook.Current;
+        Disc.Fill = _look.Disc;
+        _barTint.Background = _look.Disc;
+        Frost.Opacity = _look.GlassOpacity;
+        _outline.Stroke = _look.AccentBrush;
+        _hubEmoji.Text = _look.Center;
+        _hubEmoji.Visibility = _look.UsesLemonPicture ? Visibility.Collapsed : Visibility.Visible;
+        _hubImage.Visibility = _look.UsesLemonPicture ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Snapshots the screen where the wheel is about to appear and blurs it in the background.</summary>
+    private void StartGlass(int x, int y, int width, int height)
+    {
+        var id = ++_openCount;
+        _glass?.Dispose();
+        _glass = null;
+        Frost.Fill = null;
+        _modeBar.Background = null;
+        if (_look.Blur == 0 || Glass.Capture(x, y, width, height) is not { } picture)
+            return;
+
+        var (blur, scale) = (_look.Blur, _scale);
+        _ = Task.Run(() => Glass.Blur(picture, blur, scale)).ContinueWith(task =>
+        {
+            if (task.Exception is { } error)
+                ErrorLog.Write("Blurring the wheel's glass", error);
+            else
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (id != _openCount || !IsOpen)
+                    {
+                        task.Result.Dispose();
+                        return;
+                    }
+                    _glass = task.Result;
+                    // The disc is 4 DIPs smaller than the window and centered in its top square.
+                    var inset = (int)Math.Round(2 * _scale);
+                    Frost.Fill = Glass.Crop(_glass, inset, inset, _sizePx - 2 * inset, _sizePx - 2 * inset);
+                    UpdateBarGlass();
+                });
+        }, TaskScheduler.Default);
+    }
+
+    /// <summary>The bar's share of the blurred picture, once both the picture and the bar's width are known.</summary>
+    private void UpdateBarGlass()
+    {
+        if (_glass is null || _chips.Length == 0)
+        {
+            _modeBar.Background = null;
+            return;
+        }
+        _modeBar.Background = Glass.Crop(_glass,
+            (int)Math.Round((Center - BarWidth / 2) * _scale), (int)Math.Round(BarTop * _scale),
+            (int)Math.Round(BarWidth * _scale), (int)Math.Round((ChipHeight + 2 * BarPadding) * _scale));
+    }
+
+    private static void Recolor(FrameworkElement element, Brush brush)
+    {
+        if (element is TextBlock text)
+            text.Foreground = brush;
+        else if (element is FontIcon icon)
+            icon.Foreground = brush;
+    }
 
     private void SetHub(string text, string? icon)
     {
         _hubText.Text = text;
         _hubIcon.Glyph = icon ?? "";
         _hubIcon.Visibility = icon is null ? Visibility.Collapsed : Visibility.Visible;
-        _hubImage.Visibility = icon is null ? Visibility.Visible : Visibility.Collapsed;
+        _hubImage.Visibility = icon is null && _look.UsesLemonPicture ? Visibility.Visible : Visibility.Collapsed;
+        _hubEmoji.Visibility = icon is null && !_look.UsesLemonPicture ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void SetChoices(IReadOnlyList<Preset> choices, bool animate = false)
+    /// <summary>Lays out the slices: the current ring's presets, or on the hub the rings themselves.</summary>
+    private void ShowSlices(bool animate = false)
     {
+        _choices = _inHub || _plan.Rings.Count == 0 ? [] : _plan.Choices[_ring];
+        var labels = _inHub
+            ? _plan.Rings.Select(r => (r.Name, (string?)r.Detail, (string?)r.Glyph)).ToList()
+            : _choices.Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, (string?)null) : default).ToList();
+
         foreach (var slice in _slices)
         {
             Ring.Children.Remove(slice.Shape);
@@ -804,11 +910,10 @@ public sealed partial class WheelWindow : Window
             Ring.Children.Remove(slice.Label);
         }
         _slices.Clear();
-        _choices = choices;
 
-        var sweep = 360.0 / Math.Max(1, choices.Count);
+        var sweep = 360.0 / Math.Max(1, labels.Count);
         var wheelCenter = new Vector3((float)Center, (float)Center, 0);
-        for (var i = 0; i < choices.Count; i++)
+        for (var i = 0; i < labels.Count; i++)
         {
             var middle = i * sweep - 90;
             var radians = middle * Math.PI / 180;
@@ -826,15 +931,17 @@ public sealed partial class WheelWindow : Window
             var glow = new Path
             {
                 Data = Sector(middle - sweep / 2, middle + sweep / 2),
-                Fill = Brush("AccentFillColorDefaultBrush"),
+                Fill = _look.Highlight,
                 IsHitTestVisible = false,
             };
 
-            var (title, detail) = ConversionWheel.Label(choices[i]);
+            var (title, detail, glyph) = labels[i];
             var label = new StackPanel { Width = 84, IsHitTestVisible = false };
-            label.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, FontSize = 15, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (glyph is not null)
+                label.Children.Add(new FontIcon { Glyph = glyph, FontSize = 16, Foreground = _look.Text, Margin = new Thickness(0, 0, 0, 2) });
+            label.Children.Add(new TextBlock { Text = title, FontWeight = FontWeights.SemiBold, FontSize = 15, TextAlignment = TextAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = _look.Text });
             if (detail is not null)
-                label.Children.Add(new TextBlock { Text = detail, FontSize = 11, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, Opacity = 0.75 });
+                label.Children.Add(new TextBlock { Text = detail, FontSize = 11, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, MaxLines = 2, TextTrimming = TextTrimming.CharacterEllipsis, Opacity = 0.75, Foreground = _look.Text });
 
             var labelRadius = (InnerRadius + OuterRadius) / 2;
             Canvas.SetLeft(label, Center + labelRadius * Math.Cos(radians) - label.Width / 2);
@@ -871,7 +978,7 @@ public sealed partial class WheelWindow : Window
     }
 
     /// <summary>A ring slice between two angles (degrees, 0 = right, clockwise), drawn as fine polylines.</summary>
-    private static PathGeometry Sector(double fromDegrees, double toDegrees)
+    internal static PathGeometry Sector(double fromDegrees, double toDegrees)
     {
         const int steps = 24;
         Point At(double radius, double degrees) =>

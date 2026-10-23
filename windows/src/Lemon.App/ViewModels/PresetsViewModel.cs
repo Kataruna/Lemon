@@ -130,6 +130,9 @@ public sealed partial class PresetsViewModel : ObservableObject
             return;
         var index = Items.IndexOf(preset);
         _store.Delete(preset.Id);
+        // Also take it off the wheel, so it doesn't linger there as a dead entry.
+        App.Settings.Wheel.Forget(preset.Id);
+        App.Settings.Save();
         Reload(Items.ElementAtOrDefault(Math.Max(0, index - 1))?.Id);
     }
 

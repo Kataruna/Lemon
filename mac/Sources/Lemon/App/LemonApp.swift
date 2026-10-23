@@ -21,7 +21,7 @@ enum JobState: Equatable {
     private(set) lazy var icon = NSWorkspace.shared.icon(forFile: url.path)
     init(_ url: URL, options: [Preset]) {
         self.url = url; self.options = options
-        preset = options.first { $0.strength == nil && $0.removeBackground == nil } ?? options.first
+        preset = options.first { $0.strength == nil && $0.removeBackground == nil && !$0.isResize } ?? options.first
     }
 
     func run() async {
@@ -32,6 +32,7 @@ enum JobState: Equatable {
             switch r {
             case .done(let u): state = .done(u.lastPathComponent)
             case .alreadyOptimized: state = .note("Already optimized")
+            case .alreadySmall: state = .note("Already small enough")
             }
         } catch is CancellationError { state = .idle }
         catch let e as LemonError { state = .failed(e.message) }

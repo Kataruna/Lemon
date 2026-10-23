@@ -107,6 +107,75 @@ public class ConversionWheelTests
     [Fact]
     public void NothingDraggedMeansNoChoices() => Assert.Empty(ConversionWheel.Choose([], MediaKind.Image));
 
+    /// <summary>What a single PNG can use without a background model: image formats, the Optimize strengths and the sizes.</summary>
+    private static IReadOnlyList<(MediaKind, IReadOnlyList<Preset>)> Png() =>
+        [(MediaKind.Image, BuiltInPresets.All
+            .Where(p => p.RemoveBackground is null && (p.Id.StartsWith("img-") || p.IsOptimize || p.IsResize || p.Id == "doc-pdf"))
+            .ToList())];
+
+    private static string[] Ids(WheelPlan plan) => [.. plan.Rings.Select(r => r.Id)];
+
+    [Fact]
+    public void HandPickedConvertRingShowsOnlyThoseInThatOrder()
+    {
+        var settings = new WheelSettings { ConvertRing = { [MediaKind.Image] = ["img-webp", "img-avif", "aud-mp3-320"] } };
+
+        var plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+
+        // MP3 can't be made from a PNG, so it's skipped.
+        Assert.Equal(["img-webp", "img-avif"], plan.Choices[0].Select(p => p.Id));
+    }
+
+    [Fact]
+    public void CustomRingsMixAnyPresetsAndHiddenRingsAreLeftOut()
+    {
+        var mine = new CustomRing { Name = "Web", PresetIds = ["resize-fhd", "optimize-smaller", "img-webp", "vid-mp4"] };
+        var settings = new WheelSettings { Rings = [mine], HiddenRings = ["optimize", "cutout"] };
+
+        var plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+
+        Assert.Equal(["convert", "resize", mine.Id], Ids(plan));
+        Assert.Equal(["resize-fhd", "optimize-smaller", "img-webp"], plan.Choices[2].Select(p => p.Id));
+        Assert.False(plan.HubOn);
+    }
+
+    [Fact]
+    public void OpensOnTheRingChosenForTheKindOrTheHub()
+    {
+        var settings = new WheelSettings { OpensOn = { [MediaKind.Image] = "resize" } };
+        var plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+        Assert.Equal("resize", plan.Rings[plan.Start].Id);
+        Assert.False(plan.OpensOnHub);
+
+        settings.OpenOnHub = true;
+        plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+        Assert.True(plan.HubOn);
+        Assert.True(plan.OpensOnHub);
+    }
+
+    [Fact]
+    public void AChosenRingWithNothingForTheFilesFallsBackToTheFirst()
+    {
+        // Cut out has nothing without a downloaded model; Png() doesn't include it.
+        var settings = new WheelSettings { OpensOn = { [MediaKind.Image] = "cutout" } };
+        var plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+        Assert.Equal(0, plan.Start);
+        Assert.False(plan.OpensOnHub);
+    }
+
+    [Fact]
+    public void MoreRingsThanFitOnTheBarTurnTheHubOn()
+    {
+        var settings = new WheelSettings { Rings = [new() { Name = "A", PresetIds = ["img-png"] }, new() { Name = "B", PresetIds = ["img-jpg"] }] };
+
+        var plan = ConversionWheel.Plan(Png(), MediaKind.Image, settings);
+
+        Assert.Equal(5, plan.Rings.Count);
+        Assert.True(plan.HubOn);
+        // Nothing chosen: still opens on the first ring; the hub is one step away.
+        Assert.False(plan.OpensOnHub);
+    }
+
     [Theory]
     [InlineData("MP4 – 720p small", "mp4", "MP4", "720p small")]
     [InlineData("JPEG – High quality", "jpg", "JPG", "High quality")]

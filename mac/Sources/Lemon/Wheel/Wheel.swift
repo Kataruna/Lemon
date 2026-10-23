@@ -47,18 +47,19 @@ let favorites: [Kind: [String]] = [
 /// One of the wheel's rings: built in, or made by the user in Settings. Tab cycles them, 1–9 jump straight to one.
 struct WheelMode: Hashable {
     let id: String   // "convert", "optimize", "tools", or a custom ring's id
-    static let convert = WheelMode(id: "convert"), optimize = WheelMode(id: "optimize"), tools = WheelMode(id: "tools")
-    static let builtIns = [convert, optimize, tools]
+    static let convert = WheelMode(id: "convert"), optimize = WheelMode(id: "optimize"), tools = WheelMode(id: "tools"), resize = WheelMode(id: "resize")
+    static let builtIns = [convert, optimize, tools, resize]
     /// Built-in rings first, then the user's, in Settings order.
     static var all: [WheelMode] { builtIns + (PrefStore.shared.p.rings ?? []).map { WheelMode(id: $0.id) } }
     var custom: CustomRing? { PrefStore.shared.p.rings?.first { $0.id == id } }
-    var title: String { custom?.name ?? ["convert": "Convert", "optimize": "Optimize", "tools": "Cut out"][id] ?? "" }
-    var symbol: String { custom?.symbol ?? ["convert": "arrow.triangle.2.circlepath", "optimize": "arrow.down.right.and.arrow.up.left", "tools": "scissors"][id] ?? "star" }
-    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background"][id] ?? "" }
+    var title: String { custom?.name ?? ["convert": "Convert", "optimize": "Optimize", "tools": "Cut out", "resize": "Resize"][id] ?? "" }
+    var symbol: String { custom?.symbol ?? ["convert": "arrow.triangle.2.circlepath", "optimize": "arrow.down.right.and.arrow.up.left", "tools": "scissors", "resize": "arrow.up.left.and.arrow.down.right"][id] ?? "star" }
+    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background", "resize": "Shrink images"][id] ?? "" }
     func holds(_ p: Preset) -> Bool {
         if let c = custom { return c.presets.contains(p.name) }
         switch self {
-        case .convert: return p.strength == nil && p.removeBackground == nil
+        case .convert: return p.strength == nil && p.removeBackground == nil && !p.isResize
+        case .resize: return p.isResize
         case .optimize: return p.strength != nil
         default: return p.removeBackground != nil
         }
@@ -86,6 +87,7 @@ func wheelChoices(_ table: [(kind: Kind, presets: [Preset])], main: Kind, _ mode
     let mine = PrefStore.shared.p.slots[main], favs = mine ?? favorites[main]!
     func rank(_ p: Preset) -> Int {
         if let c = mode.custom { return c.presets.firstIndex(of: p.name) ?? 99 }
+        if mode == .resize { return -(p.maxWidth ?? 0) }   // largest first
         return mode == .tools ? [BGEngine.vision, .lite, .full].firstIndex(of: p.removeBackground!)! : optimize ? [Strength.lossless, .balanced, .smaller].firstIndex(of: p.strength!)! : favs.firstIndex(of: p.name) ?? 99
     }
     func pick(_ lists: [[Preset]]) -> [Preset] {
@@ -100,6 +102,7 @@ func wheelChoices(_ table: [(kind: Kind, presets: [Preset])], main: Kind, _ mode
 
 /// "MP4" over "720p small": the format over what makes the preset different.
 func wheelLabel(_ p: Preset) -> (String, String?) {
+    if p.isResize, let side = p.maxWidth ?? p.maxHeight { return (String(p.name.split(separator: "–").last ?? "").trimmingCharacters(in: .whitespaces), "\(side) px") }
     if let e = p.removeBackground { return [BGEngine.vision: ("Quick", "Apple Vision"), .lite: ("Lite", "BiRefNet"), .full: ("Full", "Best quality")][e]! }
     if let s = p.strength { return (s.rawValue, [Strength.lossless: "Same pixels", .balanced: "Looks the same", .smaller: "Slightly lower quality"][s]) }
     let title = p.ext.uppercased()
