@@ -19,7 +19,7 @@ namespace Lemon.App.Wheel;
 /// <summary>
 /// The round format picker that pops up under the cursor mid-drag. Drop files on a slice to convert them
 /// with that preset straight away, or on the middle to just add them to the queue. A second ring holds the
-/// Optimize strengths; hover the little button in the hub, press Tab or scroll to switch rings.
+/// Optimize strengths; hover the little button in the hub, press Tab, 1 / 2 / 3 or scroll to switch rings.
 /// </summary>
 public sealed partial class WheelWindow : Window
 {
@@ -164,8 +164,17 @@ public sealed partial class WheelWindow : Window
     /// <param name="step">+1 for forward (Tab, scroll down, the page button), -1 for back; sets the spin direction.</param>
     public void TurnPage(int step)
     {
+        if (NextPage(step) is { } next)
+            GoToPage(next, step);
+    }
+
+    /// <summary>Jumps straight to a ring (the 1 / 2 / 3 keys), if it has something on it.</summary>
+    public void GoToPage(WheelPage page) => GoToPage(page, page > _page ? 1 : -1);
+
+    private void GoToPage(WheelPage next, int step)
+    {
         _pageTimer.Stop();
-        if (!IsOpen || _closing || _dropped || NextPage(step) is not { } next)
+        if (!IsOpen || _closing || _dropped || next == _page || _pages[(int)next].Count == 0)
             return;
 
         _page = next;

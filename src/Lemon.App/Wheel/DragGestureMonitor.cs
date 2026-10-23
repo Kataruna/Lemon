@@ -47,6 +47,9 @@ internal sealed class DragGestureMonitor : IDisposable
     /// </summary>
     public event Action<int>? PageRequested;
 
+    /// <summary>1, 2 or 3 asked for a specific page. Raised on the hook thread.</summary>
+    public event Action<WheelPage>? PageSelected;
+
     /// <summary>
     /// Whether the conversion wheel is up. Tab and scrolling are only taken over while it is and a drag is going on,
     /// so they work normally everywhere else. Called on the hook thread, so it must be quick.
@@ -142,6 +145,13 @@ internal sealed class DragGestureMonitor : IDisposable
 
             if (isDown && info.VirtualKey == Native.VK_ESCAPE)
                 EscapePressed?.Invoke();
+
+            // 1 / 2 / 3 jump straight to Convert / Optimize / Cut out, only while the wheel is up mid-drag.
+            if (isDown && info.VirtualKey is >= 0x31 and <= 0x33 && IsWheelOpen?.Invoke() == true && IsLeftButtonDown())
+            {
+                PageSelected?.Invoke((WheelPage)(info.VirtualKey - 0x31));
+                return 1;
+            }
 
             // When Tab is the wheel key itself, it only opens the wheel (scroll still turns rings); otherwise holding
             // it to open the wheel would turn the ring on auto-repeat and leave the wheel key's state stuck.
