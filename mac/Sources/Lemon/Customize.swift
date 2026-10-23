@@ -1,0 +1,497 @@
+import SwiftUI
+import AppKit
+
+// MARK: saved preferences
+
+/// An sRGB color that can be saved.
+struct RGBA: Codable, Hashable {
+    var r, g, b: Double
+    init(_ r: Double, _ g: Double, _ b: Double) { self.r = r; self.g = g; self.b = b }
+    init(_ c: Color) {
+        let n = NSColor(c).usingColorSpace(.sRGB) ?? .orange
+        self.init(n.redComponent, n.greenComponent, n.blueComponent)
+    }
+    var color: Color { Color(.sRGB, red: r, green: g, blue: b) }
+}
+
+struct WheelTheme: Codable, Hashable {
+    var name: String
+    var accent: RGBA, deep: RGBA   // the highlight runs from accent (top) to deep (bottom)
+    var tint = 0.12                // how strongly the glass takes the accent
+    var center = "🍋"
+    var label: RGBA? = nil         // nil follows light / dark mode
+    var system: Bool? = nil        // follow the accent color in System Settings instead of `accent`
+
+    /// The accent color, or the Mac's own; the darker end of the gradient follows it.
+    var accentColor: Color { system == true ? Color(nsColor: .controlAccentColor) : accent.color }
+    var deepColor: Color {
+        guard system == true else { return deep.color }
+        return Color(nsColor: NSColor.controlAccentColor.blended(withFraction: 0.25, of: .black) ?? .controlAccentColor)
+    }
+    var gradient: LinearGradient { LinearGradient(colors: [accentColor, deepColor], startPoint: .top, endPoint: .bottom) }
+    var text: Color { label?.color ?? .primary }
+
+    static let builtIn = [
+        WheelTheme(name: "Tangerine", accent: RGBA(1, 0.55, 0), deep: RGBA(1, 0.36, 0)),
+        WheelTheme(name: "Lime", accent: RGBA(0.55, 0.85, 0.1), deep: RGBA(0.3, 0.66, 0.05), center: "🍋‍🟩"),
+        WheelTheme(name: "Berry", accent: RGBA(0.93, 0.22, 0.5), deep: RGBA(0.72, 0.1, 0.45), center: "🍓"),
+        WheelTheme(name: "Ocean", accent: RGBA(0.15, 0.6, 1), deep: RGBA(0.05, 0.38, 0.9), center: "🫐"),
+        WheelTheme(name: "Graphite", accent: RGBA(0.55, 0.56, 0.6), deep: RGBA(0.33, 0.34, 0.38)),
+        WheelTheme(name: "macOS Accent", accent: RGBA(0, 0.48, 1), deep: RGBA(0, 0.36, 0.75), system: true),
+    ]
+}
+
+/// How the wheel's glass looks. macOS has no blur-radius setting for Liquid Glass or materials, so blur is a choice of
+/// four looks, from none to heavy.
+struct GlassStyle: Codable, Equatable {
+    var blur = 2          // 0 none: a plain see-through pane, 1 light: clear glass, 2 standard glass, 3 heavy: glass over frost
+    var opacity = 1.0     // of the glass layer; lower shows more of what's behind
+    static let blurNames = ["None", "Light", "Standard", "Heavy"]
+}
+
+struct Prefs: Codable, Equatable {
+    var theme = WheelTheme.builtIn[0]
+    var slots: [Kind: [String]] = [:]   // the Convert ring per kind, by preset name; missing = `favorites`
+    var custom: [Preset] = []
+    // Optional so prefs saved before these existed still decode.
+    var hidden: Set<String>? = nil      // built-in rings switched off, by WheelMode id
+    var rings: [CustomRing]? = nil
+    var hub: Bool? = nil                // every file opens on the hub
+    var start: [Kind: String]? = nil    // without the hub, the ring files of a kind open on; missing = the first ring
+    var glass: GlassStyle? = nil
+}
+
+/// A ring the user puts together from any presets: convert, optimize, remove background, their own.
+struct CustomRing: Codable, Hashable, Identifiable {
+    var id = UUID().uuidString
+    var name = ""
+    var symbol = "star"
+    var presets: [String] = []   // by name, clockwise from the top; ones a file can't use are skipped
+    static let symbols = ["star", "bolt", "heart", "flag", "bookmark", "wand.and.stars", "paintbrush", "camera", "film", "music.note", "doc", "briefcase"]
+}
+
+/// Every preset a custom ring can hold, grouped for a menu. "PDF" is in both Images and Documents: by name it's one entry.
+func ringCandidates() -> [(String, [Preset])] {
+    let custom = PrefStore.shared.p.custom
+    return [("Optimize", optimizePresets), ("Remove background", backgroundPresets)]
+        + Kind.allCases.map { k in (k.rawValue, (builtIn + custom).filter { $0.kind == k }) }
+}
+
+/// Everything the user customized, saved to UserDefaults on every change.
+final class PrefStore: ObservableObject {
+    static let shared = PrefStore()
+    // ponytail: one JSON blob; a field added later must be optional or the old blob fails to decode and resets.
+    /// Saved a moment after the last change: a slider or color wheel changes it dozens of times a second.
+    @Published var p: Prefs { didSet { pending?.cancel(); pending = DispatchWorkItem { [weak self] in self?.save() }; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: pending!) } }
+    private var pending: DispatchWorkItem?
+    private init() {
+        p = UserDefaults.standard.data(forKey: "prefs").flatMap { try? JSONDecoder().decode(Prefs.self, from: $0) } ?? Prefs()
+        // Quitting inside that moment still saves.
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in self?.save() }
+        // The "macOS Accent" theme redraws when the accent is changed in System Settings.
+        NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            if self?.p.theme.system == true { self?.objectWillChange.send() }
+        }
+    }
+    private func save() {
+        pending?.cancel(); pending = nil
+        if let d = try? JSONEncoder().encode(p) { UserDefaults.standard.set(d, forKey: "prefs") }
+    }
+}
+
+/// What can go on the Convert ring for files of this kind.
+func wheelCandidates(_ k: Kind) -> [Preset] {
+    let all = builtIn + PrefStore.shared.p.custom
+    return all.filter { $0.kind == k } + (k == .video ? all.filter { $0.kind == .audio && audioFromVideo.contains($0.ext) } : [])
+}
+
+// MARK: settings
+
+extension View {
+    func settingsPage(height: CGFloat? = nil) -> some View {
+        formStyle(.grouped).frame(width: 500, height: height).tint(tangerine)
+            // Not seeThroughWindow(): on the Settings window that hides the close/minimise/zoom buttons.
+            .scrollContentBackground(.hidden).background(DesktopBlur().ignoresSafeArea())
+    }
+}
+
+struct SettingsView: View {
+    var body: some View {
+        TabView {
+            WheelSettings().tabItem { Label("Wheel", systemImage: "circle.circle") }
+            PresetSettings().tabItem { Label("Presets", systemImage: "slider.horizontal.3") }
+            BackgroundSettings().tabItem { Label("Background", systemImage: "scissors") }
+        }
+    }
+}
+
+/// A file of each kind, for the preview wheel.
+private let sample: [Kind: String] = [.image: "png", .audio: "wav", .video: "mov", .document: "docx"]
+
+struct WheelSettings: View {
+    @ObservedObject private var store = PrefStore.shared
+    @StateObject private var preview = WheelModel()
+    @State private var kind = Kind.image
+    @State private var editingRing: CustomRing?
+
+    var body: some View {
+        let t = store.p.theme
+        Form {
+            Section {
+                WheelView(model: preview).scaleEffect(0.7).frame(width: 266, height: 266).frame(maxWidth: .infinity)
+            }
+            Section("Look") {
+                Picker("Theme", selection: Binding(get: { t.name }, set: { n in
+                    if let b = WheelTheme.builtIn.first(where: { $0.name == n }) { store.p.theme = b }
+                })) {
+                    ForEach(WheelTheme.builtIn, id: \.name) { Text($0.name).tag($0.name) }
+                    if t.name == "Custom" { Text("Custom").tag("Custom") }
+                }
+                ColorPicker("Accent", selection: Binding(get: { t.accentColor }, set: { c in
+                    let n = NSColor(c)
+                    var theme = t   // one change, not three: each one redraws every wheel
+                    theme.system = nil
+                    theme.accent = RGBA(c)
+                    theme.deep = RGBA(Color(nsColor: n.blended(withFraction: 0.25, of: .black) ?? n))
+                    theme.name = "Custom"
+                    store.p.theme = theme
+                }), supportsOpacity: false)
+                Slider(value: bind(\.tint), in: 0...0.5) { Text("Glass tint") }
+                // The last character typed wins, so a new emoji replaces the old one.
+                TextField("Center", text: Binding(get: { t.center }, set: { v in edit { $0.center = String(v.suffix(1)) } }))
+                Toggle("Custom text color", isOn: Binding(get: { t.label != nil }, set: { on in edit { $0.label = on ? RGBA(.white) : nil } }))
+                if let l = t.label {
+                    ColorPicker("Text color", selection: Binding(get: { l.color }, set: { c in edit { $0.label = RGBA(c) } }), supportsOpacity: false)
+                }
+            }
+            Section {
+                let g = store.p.glass ?? GlassStyle()
+                Picker("Blur", selection: Binding(get: { g.blur }, set: { v in var x = g; x.blur = v; store.p.glass = x })) {
+                    ForEach(GlassStyle.blurNames.indices, id: \.self) { Text(GlassStyle.blurNames[$0]).tag($0) }
+                }.pickerStyle(.segmented)
+                Slider(value: Binding(get: { g.opacity }, set: { v in var x = g; x.opacity = v; store.p.glass = x }), in: 0.3...1) { Text("Opacity") }
+            } header: { Text("Glass") } footer: {
+                Text("None is a clear pane with no blur; Light uses Liquid Glass's clear style; Heavy frosts the glass further. Lower opacity shows more of what's behind the wheel.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                let hidden = store.p.hidden ?? []
+                let visible = WheelMode.builtIns.filter { !hidden.contains($0.id) }
+                ForEach(WheelMode.builtIns, id: \.self) { m in
+                    Toggle(isOn: Binding(get: { visible.contains(m) }, set: { on in
+                        var h = hidden; if on { h.remove(m.id) } else { h.insert(m.id) }; store.p.hidden = h
+                    })) { Label(m.title, systemImage: m.symbol) }
+                    // Keep at least one ring: the last built-in one stays on unless there's a ring of your own.
+                    .disabled(visible == [m] && (store.p.rings ?? []).isEmpty)
+                }
+                ForEach(store.p.rings ?? []) { r in
+                    HStack {
+                        Label(r.name, systemImage: r.symbol)
+                        Spacer()
+                        Text("\(r.presets.count) tools").foregroundStyle(.secondary)
+                        Button("Edit") { editingRing = r }
+                        Button { deleteRing(r) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                            .disabled(visible.isEmpty && store.p.rings?.count == 1)
+                    }
+                }
+                Button("New Ring…") { editingRing = CustomRing() }.disabled((store.p.rings ?? []).count >= 5)
+            } header: { Text("Rings") } footer: {
+                Text("Make a ring of the tools you use together, like Optimize and Remove background. Rings you hide are skipped by the hub, Tab and the scroll wheel.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Toggle("Open on the hub", isOn: Binding(get: { store.p.hub ?? false }, set: { store.p.hub = $0 }))
+                if !(store.p.hub ?? false) {
+                    let rings = WheelMode.all.filter { !(store.p.hidden ?? []).contains($0.id) }
+                    ForEach(Kind.allCases, id: \.self) { k in
+                        Picker(k.rawValue, selection: Binding(get: { rings.first { $0.id == store.p.start?[k] }?.id ?? rings.first?.id ?? "" }, set: { v in
+                            var s = store.p.start ?? [:]; s[k] = v; store.p.start = s
+                        })) {
+                            ForEach(rings, id: \.id) { m in Label(m.title, systemImage: m.symbol).tag(m.id) }
+                        }
+                    }
+                }
+            } header: { Text("Opens on") } footer: {
+                Text("The hub shows the rings as wedges for every kind of file; rest the files on one to open it. Without it, each kind opens on its own ring. With more than four rings, the hub is how you switch. If a ring has nothing for the files, the wheel opens on the hub or the first ring instead.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            slotsSection
+        }
+        .settingsPage(height: 640)
+        .sheet(item: $editingRing) { RingEditor(ring: $0) }
+        .onAppear(perform: reloadPreview)
+        // Not on theme changes: the preview redraws with those by itself, and a slider sends dozens a second.
+        .onChange(of: store.p.slots) { reloadPreview() }
+        .onChange(of: store.p.custom) { reloadPreview() }
+        .onChange(of: store.p.rings) { reloadPreview() }
+        .onChange(of: store.p.hidden) { reloadPreview() }
+        .onChange(of: store.p.hub) { reloadPreview() }
+        .onChange(of: store.p.start) { reloadPreview() }
+        .onChange(of: kind) { reloadPreview() }
+    }
+
+    private var slotsSection: some View {
+        // Names whose preset is gone (deleted, or changed to another kind) are dropped.
+        let candidates = wheelCandidates(kind), names = Set(candidates.map(\.name))
+        let slots = (store.p.slots[kind] ?? favorites[kind]!).filter(names.contains)
+        func set(_ s: [String]) { store.p.slots[kind] = s }
+        return Section {
+            Picker("Files", selection: $kind) { ForEach(Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.pickerStyle(.segmented)
+            OrderedNames(names: slots, set: set)
+            HStack {
+                Menu("Add Format") {
+                    ForEach(candidates.filter { !slots.contains($0.name) }) { p in Button(p.name) { set(slots + [p.name]) } }
+                }.fixedSize().disabled(slots.count >= 8)
+                Spacer()
+                Button("Reset") { store.p.slots[kind] = nil }.disabled(store.p.slots[kind] == nil)
+            }
+        } header: { Text("Convert ring") } footer: {
+            Text("Up to 8, clockwise from the top. Formats a file can't be converted to are skipped.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func deleteRing(_ r: CustomRing) {
+        store.p.rings?.removeAll { $0.id == r.id }
+        store.p.start = store.p.start?.filter { $0.value != r.id }
+    }
+
+    /// Any change to the look makes it a custom theme. A write of the same value isn't one: the Center field writes its
+    /// text back when Settings opens, which used to turn a built-in theme into "Custom" untouched.
+    private func edit(_ f: (inout WheelTheme) -> Void) {
+        var t = store.p.theme; f(&t)
+        guard t != store.p.theme else { return }
+        t.name = "Custom"; store.p.theme = t
+    }
+    private func bind<T>(_ k: WritableKeyPath<WheelTheme, T>) -> Binding<T> {
+        Binding(get: { store.p.theme[keyPath: k] }, set: { v in edit { $0[keyPath: k] = v } })
+    }
+
+    private func reloadPreview() {
+        preview.load([URL(fileURLWithPath: "/preview." + sample[kind]!)])
+        preview.hovered = preview.choices.first
+        preview.shown = true
+    }
+}
+
+struct PresetSettings: View {
+    @ObservedObject private var store = PrefStore.shared
+    @State private var editing: Preset?
+
+    var body: some View {
+        Form {
+            Section {
+                if store.p.custom.isEmpty { Text("No custom presets yet.").foregroundStyle(.secondary) }
+                ForEach(store.p.custom) { p in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(p.name)
+                            Text(summary(p)).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Edit") { editing = p }
+                        Button { delete(p) } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    }
+                }
+                Button("New Preset…") { editing = Preset(name: "", ext: "png", kind: .image) }
+            } header: { Text("Custom presets") } footer: {
+                Text("They show up in the main window's menus and can be put on the wheel in the Wheel tab. Files already in the list keep the presets they had.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .settingsPage(height: 420)
+        .sheet(item: $editing) { PresetEditor(original: $0) }
+    }
+
+    /// Also takes it off the wheel and out of any ring, so it doesn't linger as a dead name there.
+    private func delete(_ p: Preset) {
+        store.p.custom.removeAll { $0.name == p.name }
+        store.p.slots = store.p.slots.mapValues { $0.filter { $0 != p.name } }
+        store.p.rings = store.p.rings?.map { var r = $0; r.presets.removeAll { $0 == p.name }; return r }
+    }
+
+    private func summary(_ p: Preset) -> String {
+        var s = ["\(p.kind.rawValue) → \(p.ext.uppercased())"]
+        if let q = p.quality { s.append("quality \(q)") }
+        if let w = p.maxWidth, let h = p.maxHeight, w == h, p.kind == .image { s.append("≤ \(w) px") }
+        else {
+            if let w = p.maxWidth { s.append("≤ \(w) px wide") }
+            if let h = p.maxHeight { s.append("≤ \(h) px tall") }
+        }
+        if let k = p.kbps { s.append("\(k) kbps") }
+        if let c = p.crf { s.append("CRF \(c)") }
+        if let f = p.fps { s.append("\(f) fps") }
+        if p.strip { s.append("no metadata") }
+        return s.joined(separator: " · ")
+    }
+}
+
+struct PresetEditor: View {
+    let original: Preset
+    @State private var p: Preset
+    @ObservedObject private var store = PrefStore.shared
+    @Environment(\.dismiss) private var dismiss
+    init(original: Preset) { self.original = original; _p = State(initialValue: original) }
+
+    /// Every output format, once per kind.
+    private static let formats: [(kind: Kind, ext: String)] = {
+        var seen = Set<String>()
+        return builtIn.compactMap { seen.insert("\($0.kind)/\($0.ext)").inserted ? ($0.kind, $0.ext) : nil }
+    }()
+
+    private var name: String { p.name.trimmingCharacters(in: .whitespaces) }
+    private var taken: Bool {
+        (builtIn + optimizePresets + backgroundPresets + store.p.custom).contains { $0.name == name && $0.name != original.name }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Name", text: $p.name)
+                    Picker("Format", selection: Binding(get: { "\(p.kind)/\(p.ext)" }, set: { tag in
+                        // A new format starts from scratch: settings for the old one may not apply.
+                        if let f = Self.formats.first(where: { "\($0.kind)/\($0.ext)" == tag }) { p = Preset(name: p.name, ext: f.ext, kind: f.kind) }
+                    })) {
+                        ForEach(Kind.allCases, id: \.self) { k in
+                            Section(k.rawValue) {
+                                ForEach(Self.formats.filter { $0.kind == k }, id: \.ext) { f in
+                                    Text(k == .video && f.ext == "gif" ? "GIF (animated)" : f.ext.uppercased()).tag("\(f.kind)/\(f.ext)")
+                                }
+                            }
+                        }
+                    }
+                } footer: {
+                    if taken { Text("Another preset already has this name.").font(.caption).foregroundStyle(.red) }
+                }
+                Section {
+                    knobs
+                } footer: { Text("Leave a box empty to use the default.").font(.caption).foregroundStyle(.secondary) }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(name.isEmpty || taken)
+            }.padding()
+        }
+        .frame(width: 420, height: 440)
+    }
+
+    @ViewBuilder private var knobs: some View {
+        switch p.kind {
+        case .image:
+            if ["jpg", "webp", "avif"].contains(p.ext) { number("Quality (1–100)", $p.quality) }
+            // magick only resizes when both are set, so images get one "longest side" box.
+            number("Longest side (px)", Binding(get: { p.maxWidth }, set: { p.maxWidth = $0; p.maxHeight = $0 }))
+            Toggle("Strip metadata", isOn: $p.strip)
+        case .audio:
+            if ["mp3", "m4a", "opus", "ogg"].contains(p.ext) { number("Bitrate (kbps)", $p.kbps) }
+            Toggle("Strip metadata", isOn: $p.strip)
+        case .video:
+            if p.ext == "gif" {
+                number("Frame rate (fps)", $p.fps)
+                number("Max width (px)", $p.maxWidth)
+            } else {
+                number(p.ext == "webm" ? "Quality, CRF (0–63, lower is better)" : "Quality, CRF (0–51, lower is better)", $p.crf)
+                number("Max width (px)", $p.maxWidth)
+                number("Max height (px)", $p.maxHeight)
+                number("Frame rate (fps)", $p.fps)
+            }
+            Toggle("Strip metadata", isOn: $p.strip)
+        case .document:
+            Text("Documents have no settings beyond the format.").foregroundStyle(.secondary)
+        }
+    }
+
+    private func number(_ label: String, _ v: Binding<Int?>) -> some View {
+        TextField(label, value: v, format: .number.grouping(.never))
+    }
+
+    private func save() {
+        func clamp(_ v: Int?, _ r: ClosedRange<Int>) -> Int? { v.map { min(max($0, r.lowerBound), r.upperBound) } }
+        var q = p
+        q.name = name
+        q.quality = clamp(q.quality, 1...100)
+        q.kbps = clamp(q.kbps, 8...512)
+        q.crf = clamp(q.crf, 0...(q.ext == "webm" ? 63 : 51))
+        q.fps = clamp(q.fps, 1...120)
+        let side = q.ext == "ico" ? 16...256 : 16...16384
+        q.maxWidth = clamp(q.maxWidth, side); q.maxHeight = clamp(q.maxHeight, side)
+        if let i = store.p.custom.firstIndex(where: { $0.name == original.name }), !original.name.isEmpty { store.p.custom[i] = q }
+        else { store.p.custom.append(q) }
+        // Keep it on the wheel under its new name.
+        if !original.name.isEmpty, original.name != q.name {
+            func rename(_ s: [String]) -> [String] { s.map { $0 == original.name ? q.name : $0 } }
+            for (k, s) in store.p.slots { store.p.slots[k] = rename(s) }
+            store.p.rings = store.p.rings?.map { var r = $0; r.presets = rename(r.presets); return r }
+        }
+        dismiss()
+    }
+}
+
+struct RingEditor: View {
+    @State var ring: CustomRing
+    @ObservedObject private var store = PrefStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    private var name: String { ring.name.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Name", text: $ring.name)
+                    Picker("Icon", selection: $ring.symbol) {
+                        ForEach(CustomRing.symbols, id: \.self) { Image(systemName: $0).tag($0) }
+                    }
+                }
+                Section {
+                    if ring.presets.isEmpty { Text("Add the tools you want on this ring.").foregroundStyle(.secondary) }
+                    OrderedNames(names: ring.presets) { ring.presets = $0 }
+                    Menu("Add Tool") {
+                        ForEach(ringCandidates(), id: \.0) { group, ps in
+                            Section(group) {
+                                ForEach(ps.filter { !ring.presets.contains($0.name) }) { p in Button(p.name) { ring.presets.append(p.name) } }
+                            }
+                        }
+                    }.fixedSize().disabled(ring.presets.count >= 8)
+                } header: { Text("Tools") } footer: {
+                    Text("Up to 8, clockwise from the top. Mix formats for different kinds of files: each file only sees the ones that work for it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(name.isEmpty || ring.presets.isEmpty)
+            }.padding()
+        }
+        .frame(width: 420, height: 480)
+    }
+
+    private func save() {
+        var r = ring; r.name = name
+        var rings = store.p.rings ?? []
+        if let i = rings.firstIndex(where: { $0.id == r.id }) { rings[i] = r } else { rings.append(r) }
+        store.p.rings = rings
+        dismiss()
+    }
+}
+
+/// Preset names in wheel order, each with move up / move down / remove.
+struct OrderedNames: View {
+    let names: [String]
+    let set: ([String]) -> Void
+    var body: some View {
+        ForEach(Array(names.enumerated()), id: \.element) { i, name in
+            HStack {
+                Text(name)
+                Spacer()
+                Button { var s = names; s.swapAt(i, i - 1); set(s) } label: { Image(systemName: "chevron.up") }.disabled(i == 0)
+                Button { var s = names; s.swapAt(i, i + 1); set(s) } label: { Image(systemName: "chevron.down") }.disabled(i == names.count - 1)
+                Button { set(names.filter { $0 != name }) } label: { Image(systemName: "minus.circle") }
+            }.buttonStyle(.borderless)
+        }
+    }
+}

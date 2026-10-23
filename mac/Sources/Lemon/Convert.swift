@@ -52,6 +52,8 @@ private final class Box: @unchecked Sendable {
 /// Cancelling the task kills the process.
 @discardableResult
 func run(_ exe: String, _ args: [String], onLine: (@Sendable (String) -> Void)? = nil, onErr: (@Sendable (String) -> Void)? = nil) async throws -> String {
+    // Cancelled before launch: the handler below can't stop a process that hasn't started, so it would run to the end.
+    try Task.checkCancellation()
     let box = Box(), p = Process(), out = Pipe(), err = Pipe()
     p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
     p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
@@ -141,17 +143,23 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
         let after = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
         guard after > 0, Double(after) <= Double(before) * 0.9 else { return .alreadyOptimized }
     } else if let engine = preset.removeBackground {
-        if let model = BiRefNet.of(engine) {
-            guard model.installed else { throw LemonError(message: "Download \(model.name) in Settings first.") }
-            try BiRefNetRunner.removeBackground(model, src, tmp, progress)
-        } else {
-            // Vision chokes on some large images; a downloaded BiRefNet model takes over.
-            do { try removeBackground(src, tmp, progress) }
-            catch {
-                guard let fallback = [BGEngine.lite, .full].compactMap(BiRefNet.of).first(where: \.installed) else { throw error }
-                try BiRefNetRunner.removeBackground(fallback, src, tmp, progress)
+        // Seconds of blocking work (and a wait for the one-at-a-time model lock), so on a thread of its own rather than
+        // one of the few the async runtime shares between every job.
+        try await offPool {
+            if let model = BiRefNet.of(engine) {
+                guard model.installed else { throw LemonError(message: "Download \(model.name) in Settings first.") }
+                try BiRefNetRunner.removeBackground(model, src, tmp, progress)
+            } else {
+                // Vision chokes on some large images; a downloaded BiRefNet model takes over.
+                do { try removeBackground(src, tmp, progress) }
+                catch {
+                    guard let fallback = [BGEngine.lite, .full].compactMap(BiRefNet.of).first(where: \.installed) else { throw error }
+                    try BiRefNetRunner.removeBackground(fallback, src, tmp, progress)
+                }
             }
         }
+        // The thread above can't be interrupted; if the job was cancelled meanwhile, drop the result instead of saving it.
+        try Task.checkCancellation()
     } else {
         switch kindOf[srcExt]! {
         case .image: try await imageConvert(src, tmp, preset, progress)
@@ -161,6 +169,13 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
     }
     let base = src.deletingPathExtension().lastPathComponent + suffix
     return .done(try moveToUnique(tmp, dir: dir, base: base, ext: outExt))
+}
+
+/// Runs blocking work on a GCD thread and awaits it.
+private func offPool(_ work: @escaping @Sendable () throws -> Void) async throws {
+    try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+        DispatchQueue.global(qos: .userInitiated).async { c.resume(with: Result { try work() }) }
+    }
 }
 
 // MARK: images
@@ -247,11 +262,27 @@ private func docConvert(_ src: URL, _ dst: URL, _ s: String, _ t: String) async 
     case .soffice:
         let out = dst.deletingLastPathComponent().appendingPathComponent("soffice-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: out) }
-        try await run(try Tools.need("soffice"), ["--headless", "--convert-to", t, "--outdir", out.path, src.path])
+        // LibreOffice allows one process per profile: a second one (a parallel job, or LibreOffice open on screen) hands
+        // the file to the first and exits without converting. So each concurrent job borrows a profile of its own.
+        let slot = SofficeProfiles.take(); defer { SofficeProfiles.give(slot) }
+        try await run(try Tools.need("soffice"), ["-env:UserInstallation=" + slot.absoluteString, "--headless", "--convert-to", t, "--outdir", out.path, src.path])
         let made = out.appendingPathComponent(src.deletingPathExtension().lastPathComponent + "." + t)
         try FileManager.default.moveItem(at: made, to: dst)
     case nil: throw LemonError(message: "Can't convert .\(s) to .\(t) with the installed tools.")
     }
+}
+
+/// LibreOffice profiles, one per concurrent conversion, kept for the session (creating one costs a few seconds).
+private enum SofficeProfiles {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var free: [URL] = [], made = 0
+    static func take() -> URL {
+        lock.lock(); defer { lock.unlock() }
+        if let u = free.popLast() { return u }
+        made += 1
+        return FileManager.default.temporaryDirectory.appendingPathComponent("Lemon-soffice-\(made)", isDirectory: true)
+    }
+    static func give(_ u: URL) { lock.lock(); free.append(u); lock.unlock() }
 }
 
 // MARK: optimize

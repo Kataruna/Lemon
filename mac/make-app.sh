@@ -7,12 +7,10 @@ APP=dist/Lemon.app
 rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Lemon "$APP/Contents/MacOS/Lemon"
 
-I=$(mktemp -d)/Lemon.iconset && mkdir -p "$I"
-for s in 16 32 128 256 512; do
-  sips -z $s $s ../src/Lemon.App/Assets/Lemon.png --out "$I/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) ../src/Lemon.App/Assets/Lemon.png --out "$I/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$I" -o "$APP/Contents/Resources/Lemon.icns"
+# Lemon.icon (Icon Composer) becomes Assets.car for macOS 26 and Lemon.icns for older systems.
+xcrun actool Lemon.icon --compile "$APP/Contents/Resources" --app-icon Lemon --target-device mac --platform macosx \
+  --minimum-deployment-target 14.0 --output-partial-info-plist "$(mktemp)" >/dev/null
+cp Lemon.icon/Assets/*.svg "$APP/Contents/Resources/"   # the menu bar icon is drawn from these
 
 cat > "$APP/Contents/Info.plist" <<'PL'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -22,6 +20,7 @@ cat > "$APP/Contents/Info.plist" <<'PL'
 <key>CFBundleExecutable</key><string>Lemon</string>
 <key>CFBundleIdentifier</key><string>com.sarabunari.lemon</string>
 <key>CFBundleIconFile</key><string>Lemon</string>
+<key>CFBundleIconName</key><string>Lemon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>

@@ -1,9 +1,9 @@
 import Foundation
 
-enum Kind: String, CaseIterable { case image = "Images", audio = "Audio", video = "Video", document = "Documents" }
+enum Kind: String, CaseIterable, Codable { case image = "Images", audio = "Audio", video = "Video", document = "Documents" }
 /// Background removal engines. Vision is built in; BiRefNet (Lite / Full, downloaded in Settings) copes with large images and fine edges.
-enum BGEngine: Hashable { case vision, lite, full }
-enum Strength: String { case lossless = "Lossless", balanced = "Balanced", smaller = "Smaller" }
+enum BGEngine: Hashable, Codable { case vision, lite, full }
+enum Strength: String, Codable { case lossless = "Lossless", balanced = "Balanced", smaller = "Smaller" }
 
 let kindOf: [String: Kind] = {
     var m: [String: Kind] = [:]
@@ -14,9 +14,9 @@ let kindOf: [String: Kind] = {
     return m
 }()
 
-struct Preset: Identifiable, Hashable {
+struct Preset: Identifiable, Hashable, Codable {
     var id: String { name }
-    let name: String
+    var name: String
     let ext: String            // "" = Optimize (same format as the source)
     let kind: Kind
     var strength: Strength? = nil
@@ -66,6 +66,9 @@ let backgroundPresets = [
     Preset(name: "Remove background – Full quality", ext: "png", kind: .image, removeBackground: .full),
 ]
 
+/// Audio formats offered for video files.
+let audioFromVideo: Set<String> = ["mp3", "m4a", "opus", "flac", "wav"]
+
 let textutilIn: Set<String> = ["txt", "html", "htm", "rtf", "doc", "docx", "odt"]
 let textutilOut: Set<String> = ["txt", "html", "rtf", "doc", "docx", "odt"]
 
@@ -85,11 +88,16 @@ func presets(for url: URL) -> [Preset] {
     case .video:
         if has("ffmpeg") {
             out = builtIn.filter { $0.kind == .video && !($0.ext == src && $0.crf == nil) }
-            out += builtIn.filter { $0.kind == .audio && ["mp3", "m4a", "opus", "flac", "wav"].contains($0.ext) }
+            out += builtIn.filter { $0.kind == .audio && audioFromVideo.contains($0.ext) }
         }
     case .document:
         out = builtIn.filter { $0.kind == .document && $0.ext != src && docRoute(src, $0.ext) != nil }
     }
+    // Custom presets go wherever a built-in one for the same format does, and also to the file's own format: unlike
+    // a built-in PNG → PNG, a custom one resizes or recompresses. (Not documents: same-format there does nothing.)
+    let same = ["jpeg": "jpg", "tif": "tiff"][src] ?? src
+    let canSame = !out.isEmpty && kind != .document
+    out += PrefStore.shared.p.custom.filter { c in out.contains { $0.kind == c.kind && $0.ext == c.ext } || (canSame && c.kind == kind && c.ext == same) }
     // BiRefNet presets stay hidden until their model is downloaded.
     if kind == .image { out += backgroundPresets.filter { BiRefNet.of($0.removeBackground!)?.installed ?? true } }
     if optimizable(src) { out = optimizePresets.filter { $0.strength != .lossless || ["png", "gif"].contains(src) } + out }
