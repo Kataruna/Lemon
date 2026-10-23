@@ -119,6 +119,14 @@ public sealed class LibreOfficeConverter(ToolLocator tools) : IConverter
 
     private static readonly HashSet<string> TextDocuments = ["docx", "doc", "odt", "rtf"];
 
+    /// <summary>
+    /// Profiles not in use. LibreOffice allows one process per profile: a second one (a parallel job) hands its file
+    /// to the first and exits without converting. So each concurrent job borrows a profile of its own, kept for the
+    /// session since creating one costs a few seconds.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentBag<int> FreeProfiles = [];
+    private static int _profiles;
+
     public string Name => "LibreOffice";
     public ExternalTool? RequiredTool => ExternalTool.LibreOffice;
 
@@ -134,7 +142,9 @@ public sealed class LibreOfficeConverter(ToolLocator tools) : IConverter
         // LibreOffice names the output after the input and refuses to run headless next to an open
         // LibreOffice window, so convert into a scratch folder with a private profile, then move the result.
         var scratch = Directory.CreateTempSubdirectory("lemon-");
-        var profile = new Uri(Path.Combine(JsonFileStore.DefaultDirectory, "libreoffice-profile")).AbsoluteUri;
+        var slot = FreeProfiles.TryTake(out var free) ? free : Interlocked.Increment(ref _profiles);
+        // The first keeps the name it always had, so an existing profile is reused.
+        var profile = new Uri(Path.Combine(JsonFileStore.DefaultDirectory, slot == 1 ? "libreoffice-profile" : $"libreoffice-profile-{slot}")).AbsoluteUri;
         try
         {
             var result = await ProcessRunner.RunAsync(
@@ -157,6 +167,7 @@ public sealed class LibreOfficeConverter(ToolLocator tools) : IConverter
         }
         finally
         {
+            FreeProfiles.Add(slot);
             try { scratch.Delete(recursive: true); } catch (IOException) { }
         }
     }

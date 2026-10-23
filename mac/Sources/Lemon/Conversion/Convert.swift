@@ -28,23 +28,25 @@ enum Tools {
 
 private final class Box: @unchecked Sendable {
     let lock = NSLock(); var err = Data(), out = Data(); var proc: Process?
+    /// stdout is only kept when nobody reads it line by line: ffmpeg's progress stream would pile up for hours.
+    let keepOut: Bool
+    init(keepOut: Bool) { self.keepOut = keepOut }
     /// stderr is only kept for the error message, and progress meters can write megabytes of it.
     private static let errTail = 64 << 10
     private var partial = [Data(), Data()]
     /// Stores a chunk and returns the complete lines in it; a line cut off at the chunk's end waits for the next one.
-    /// Progress meters redraw with \r, so that ends a line too. `final` flushes the leftover.
+    /// Progress meters redraw with \r, so that ends a line too. `final` flushes the leftover. Split on bytes, not text:
+    /// a chunk can end mid-character, and a tool can print invalid UTF-8 (a file's metadata), which would otherwise
+    /// hold back every line after it.
     func append(_ d: Data, err isErr: Bool, final: Bool = false) -> [String] {
         lock.lock(); defer { lock.unlock() }
-        if isErr { err.append(d); if err.count > 2 * Self.errTail { err = err.suffix(Self.errTail) } } else { out.append(d) }
+        if isErr { err.append(d); if err.count > 2 * Self.errTail { err = err.suffix(Self.errTail) } } else if keepOut { out.append(d) }
         let i = isErr ? 1 : 0
         partial[i].append(d)
-        guard var text = String(data: partial[i], encoding: .utf8) else { return [] }
-        var keep = ""
-        if !final, let last = text.lastIndex(where: { $0 == "\n" || $0 == "\r" }) {
-            keep = String(text[text.index(after: last)...]); text = String(text[...last])
-        } else if !final { return [] }
-        partial[i] = Data(keep.utf8)
-        return text.split(whereSeparator: { $0 == "\n" || $0 == "\r" }).map(String.init)
+        let buf = partial[i], isEnd = { (b: UInt8) in b == 10 || b == 13 }
+        let cut = final ? buf.endIndex : buf.lastIndex(where: isEnd).map { buf.index(after: $0) } ?? buf.startIndex
+        partial[i] = Data(buf[cut...])
+        return buf[..<cut].split(whereSeparator: isEnd).map { String(decoding: $0, as: UTF8.self) }
     }
     func text(err isErr: Bool) -> String { lock.lock(); defer { lock.unlock() }; return String(data: isErr ? err : out, encoding: .utf8) ?? "" }
 }
@@ -55,7 +57,7 @@ private final class Box: @unchecked Sendable {
 func run(_ exe: String, _ args: [String], onLine: (@Sendable (String) -> Void)? = nil, onErr: (@Sendable (String) -> Void)? = nil) async throws -> String {
     // Cancelled before launch: the handler below can't stop a process that hasn't started, so it would run to the end.
     try Task.checkCancellation()
-    let box = Box(), p = Process(), out = Pipe(), err = Pipe()
+    let box = Box(keepOut: onLine == nil), p = Process(), out = Pipe(), err = Pipe()
     p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
     p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
     box.proc = p
@@ -143,6 +145,8 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
 
     if let strength = preset.strength {
         try await optimizeFile(src, tmp, srcExt, strength, progress)
+        // Before the size check: a cancelled similarity check leaves an empty file, which would read as "already optimized".
+        try Task.checkCancellation()
         let before = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let after = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
         guard after > 0, Double(after) <= Double(before) * 0.9 else { return .alreadyOptimized }
@@ -162,8 +166,6 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
                 }
             }
         }
-        // The thread above can't be interrupted; if the job was cancelled meanwhile, drop the result instead of saving it.
-        try Task.checkCancellation()
     } else {
         switch kindOf[srcExt]! {
         case .image: try await imageConvert(src, tmp, preset, outExt, progress)
@@ -171,6 +173,9 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
         case .document: try await docConvert(src, tmp, srcExt, preset.ext)
         }
     }
+    // Cancelled meanwhile: drop the result instead of saving it. Background removal's thread can't be interrupted, and
+    // Optimize's similarity check swallows the cancellation, so either can get here with a finished file.
+    try Task.checkCancellation()
     let base = src.deletingPathExtension().lastPathComponent + suffix
     return .done(try moveToUnique(tmp, dir: dir, base: base, ext: outExt))
 }
@@ -212,9 +217,13 @@ private func imageConvert(_ src: URL, _ dst: URL, _ p: Preset, _ outExt: String,
     let m = try Tools.need("magick")
     let multi = ["gif", "webp", "pdf", "tiff", "tif"].contains(outExt)   // formats that keep animation / pages
     var a = [multi ? src.path : src.path + "[0]", "-auto-orient"]
+    // Animations are stored as partial frames; resized one by one they'd land in the wrong place. Full frames first.
+    if multi, p.maxWidth != nil, ["gif", "webp"].contains(ext(of: src)) { a.append("-coalesce") }
     if outExt == "jpg" || outExt == "jpeg" || outExt == "bmp" { a += ["-background", "white", "-alpha", "remove", "-alpha", "off"] }
     if p.strip { a.append("-strip") }
     if let w = p.maxWidth, let h = p.maxHeight { a += ["-resize", "\(w)x\(h)>"] }
+    // Coalesced frames are full-size; store GIFs as partial frames again, or the shrunk file can come out bigger.
+    if a.contains("-coalesce"), outExt == "gif" { a += ["-layers", "optimize"] }
     if let q = p.quality { a += ["-quality", "\(q)"] }
     try await runMagick(m, a + [dst.path], progress)
 }
@@ -373,7 +382,7 @@ private func optimizeImage(_ src: URL, _ dst: URL, _ s: String, _ strength: Stre
     }
     guard let best else { try Data().write(to: dst); return }   // empty file = "nothing smaller"; the size check in convert() rejects it
     try? fm.removeItem(at: dst)
-    try fm.copyItem(at: best, to: dst)
+    try fm.moveItem(at: best, to: dst)   // same scratch folder: a rename, not a copy of a big file
 }
 
 // MARK: remove background

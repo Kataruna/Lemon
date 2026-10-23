@@ -113,8 +113,6 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
 
 // MARK: the wheel
 
-let tangerine = Color(red: 1.0, green: 0.55, blue: 0.0)
-
 @MainActor final class WheelModel: ObservableObject {
     static let size: CGFloat = 380, inner: CGFloat = 60, outer: CGFloat = 152
     /// Drops count a little past the ring's edge, as far as WheelView's catch layer goes.
@@ -137,16 +135,21 @@ let tangerine = Color(red: 1.0, green: 0.55, blue: 0.0)
     private var start: String?
     /// The hub is there when files open on it, or when there are too many rings for the bar (4 fit).
     var hubOn: Bool { canSwitch && (start == "hub" || modes.count > 4) }
-    /// Pills on the mode bar: one per ring, or with the hub on, a single one back to it (none on the hub itself).
-    var pills: Int { !canSwitch || inHub ? 0 : hubOn ? 1 : modes.count }
+    /// Inside a ring with the hub on, the center is the way back to it (unless Settings asks for the old pill).
+    var centerBack: Bool { hubOn && !inHub && !(PrefStore.shared.p.backPill ?? false) }
+    /// Pills on the mode bar: one per ring, or with the hub on, at most a single one back to it (none on the hub itself).
+    var pills: Int { !canSwitch || inHub ? 0 : hubOn ? (centerBack ? 0 : 1) : modes.count }
     /// How many wedges the wheel has right now.
     var count: Int { inHub ? modes.count : choices.count }
     private var flipTask: Task<Void, Never>?
     private enum Stop: Equatable { case hub, ring(WheelMode) }
     private var switchTarget: Stop?
+    /// The wheel opens centered on the pointer, so the center only leads back to the hub once the pointer has left it
+    /// since this ring came up; otherwise a pause right after the shake would send the files to the hub on its own.
+    private var centerArmed = false
 
     func load(_ urls: [URL]) {
-        shown = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil
+        shown = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil; centerArmed = false
         let main = mainKind(urls), table = presetTable(urls), hidden = PrefStore.shared.p.hidden ?? []
         byMode = main.map { main in Dictionary(uniqueKeysWithValues: WheelMode.all.map { ($0, wheelChoices(table, main: main, $0)) }) } ?? [:]
         modes = WheelMode.all.filter { !hidden.contains($0.id) && !(byMode[$0] ?? []).isEmpty }
@@ -164,7 +167,7 @@ let tangerine = Color(red: 1.0, green: 0.55, blue: 0.0)
     }
     func go(_ m: WheelMode) {
         guard modes.contains(m), inHub || m != mode else { return }
-        mode = m; inHub = false; hovered = nil; hoveredMode = nil
+        mode = m; inHub = false; hovered = nil; hoveredMode = nil; centerArmed = false
     }
     func cycle(_ step: Int) {
         let ms = modes
@@ -180,6 +183,7 @@ let tangerine = Color(red: 1.0, green: 0.55, blue: 0.0)
         let dx = p.x - Self.size / 2, dy = p.y - Self.size / 2, d = hypot(dx, dy)
         // draggingUpdated fires nonstop; assigning a @Published even to the same value redraws the whole wheel.
         if lemonHot != (d < Self.inner) { lemonHot = d < Self.inner }
+        if !lemonHot { centerArmed = true }
         let n = pills, ms = modes
         // The bar's strip never counts as a wedge, even on the hub where no pill is drawn: otherwise resting there opens the
         // bottom ring, whose "All modes" pill then sends it back to the hub, and round it goes.
@@ -197,6 +201,7 @@ let tangerine = Color(red: 1.0, green: 0.55, blue: 0.0)
         // Where resting here leads: a hub wedge, or the pill under the pointer (86 pt per pill, centered).
         var target: Stop? = bestMode.map { .ring($0) }
         if onSwitch { target = hubOn ? .hub : .ring(ms[min(max(Int((dx + CGFloat(n) * 43) / 86), 0), n - 1)]) }
+        if centerBack, lemonHot, centerArmed { target = .hub }
         if target != switchTarget {
             switchTarget = target
             flipTask?.cancel()
@@ -246,14 +251,18 @@ extension View {
         }
     }
 
-    /// The wheel's glass at a GlassStyle blur level.
-    @ViewBuilder func wheelGlass<S: Shape>(_ shape: S, tint: Color, blur: Int) -> some View {
+    /// The wheel's glass at a frost level. Liquid Glass is clear for the lighter two and regular for the heavier two;
+    /// frost under the full shape would leave the glass nothing to bend, so it fades out short of the edges (a hard
+    /// edge reads as a stroke inside the ring). With Liquid Glass off the same glass is drawn flat: see WheelPanel.
+    @ViewBuilder func wheelGlass<S: InsettableShape>(_ shape: S, tint: Color, blur: Int) -> some View {
+        // A plain color, not a material: a material re-samples what's behind the window and flickers where it fades out.
+        // The glass underneath already blurs.
+        let fade = shape.inset(by: 8).fill().blur(radius: 8)
+        let frost = Color(nsColor: .windowBackgroundColor)
         switch blur {
-        case 0:   // no blur at all: a faint pane, its edge, and the tint
-            background(shape.fill(tint.opacity(0.75))).background(shape.fill(Color(nsColor: .windowBackgroundColor).opacity(0.25)))
-                .overlay(shape.stroke(.white.opacity(0.3), lineWidth: 1))
-        case 1: glass(shape, tint: tint, clear: true)
-        case 3: glass(shape, tint: tint).background(shape.fill(.thickMaterial))
+        case 0: glass(shape, tint: tint, clear: true)
+        case 1: background(Rectangle().fill(frost.opacity(0.3)).mask(fade)).glass(shape, tint: tint, clear: true)
+        case 3: background(Rectangle().fill(frost.opacity(0.6)).mask(fade)).glass(shape, tint: tint)
         default: glass(shape, tint: tint)
         }
     }
@@ -284,12 +293,37 @@ func wheelSymbol(_ p: Preset) -> String {
 }
 
 /// The glass ring: a circle with the middle cut out.
-struct Annulus: Shape {
+struct Annulus: InsettableShape {
     var inner: CGFloat, outer: CGFloat
     func path(in r: CGRect) -> Path {
         let c = CGPoint(x: r.midX, y: r.midY)
         func disc(_ rad: CGFloat) -> Path { Path(ellipseIn: CGRect(x: c.x - rad, y: c.y - rad, width: rad * 2, height: rad * 2)) }
         return disc(outer).subtracting(disc(inner))
+    }
+    func inset(by a: CGFloat) -> Annulus { Annulus(inner: inner + a, outer: outer - a) }
+}
+
+/// The wheel's glass on its own. Hovering a wedge redraws WheelView, and Liquid Glass rebuilt on every hover change
+/// stutters under a moving drag; being Equatable, this redraws only when what it shows changes.
+struct WheelGlass: View, Equatable {
+    let accent: Color, tint: Double, style: GlassStyle, lemonHot: Bool, switchHot: Bool, pills: Int
+    var body: some View {
+        let inner = WheelModel.inner, outer = WheelModel.outer, lemon = inner * 2 - 14
+        let spring = Animation.spring(response: 0.22, dampingFraction: 0.75)
+        GlassBox {
+            ZStack {
+                Color.clear.wheelGlass(Annulus(inner: inner, outer: outer), tint: accent.opacity(tint), blur: style.blur)
+                Color.clear.frame(width: lemon, height: lemon)
+                    .wheelGlass(Circle(), tint: lemonHot ? accent.opacity(0.9) : accent.opacity(tint), blur: style.blur)
+                    .scaleEffect(lemonHot ? 1.1 : 1).animation(spring, value: lemonHot)
+                if pills > 0 {
+                    Color.clear.frame(width: WheelView.barWidth(pills), height: 28)
+                        .wheelGlass(Capsule(), tint: switchHot ? accent.opacity(tint + 0.23) : accent.opacity(tint), blur: style.blur)
+                        .position(x: WheelModel.size / 2, y: WheelModel.size / 2 + outer + 20)
+                }
+            }
+        }
+        .opacity(style.opacity)
     }
 }
 
@@ -307,27 +341,15 @@ struct WheelView: View {
             : model.choices.map { p in let (title, detail) = wheelLabel(p); return (wheelSymbol(p), title, detail, model.hovered == p) }
         let n = slots.count, half = Double.pi / Double(max(n, 1))
         let inner = WheelModel.inner, outer = WheelModel.outer, mid = (inner + outer) / 2
-        let pillY = WheelModel.size / 2 + outer + 20, lemon = inner * 2 - 14
+        let pillY = WheelModel.size / 2 + outer + 20
         let t = store.p.theme, accent = t.accentColor, g = store.p.glass ?? GlassStyle()
         ZStack {
             // Nearly clear, not clear: the window server hands drags over fully transparent pixels to the window behind,
             // so without this the gap between the lemon and the ring (and the ring's soft edge) drop onto the desktop.
             Circle().fill(Color.black.opacity(0.01)).frame(width: WheelModel.reach * 2, height: WheelModel.reach * 2)
             // Glass draws above its siblings, so the glow and text live in layers on top of it.
-            GlassBox {
-                ZStack {
-                    Color.clear.wheelGlass(Annulus(inner: inner, outer: outer), tint: accent.opacity(t.tint), blur: g.blur)
-                    Color.clear.frame(width: lemon, height: lemon)
-                        .wheelGlass(Circle(), tint: model.lemonHot ? accent.opacity(0.9) : accent.opacity(t.tint), blur: g.blur)
-                        .scaleEffect(model.lemonHot ? 1.1 : 1).animation(spring, value: model.lemonHot)
-                    if model.pills > 0 {
-                        Color.clear.frame(width: Self.barWidth(model.pills), height: 28)
-                            .wheelGlass(Capsule(), tint: model.switchHot ? accent.opacity(t.tint + 0.23) : accent.opacity(t.tint), blur: g.blur)
-                            .position(x: WheelModel.size / 2, y: pillY)
-                    }
-                }
-            }
-            .opacity(g.opacity)
+            WheelGlass(accent: accent, tint: t.tint, style: g, lemonHot: model.lemonHot, switchHot: model.switchHot, pills: model.pills)
+                .equatable()
             // Hairline dividers between segments.
             if n > 1 {
                 ForEach(0..<n, id: \.self) { i in
@@ -357,7 +379,10 @@ struct WheelView: View {
                 .position(spot(model.angle(i), mid))
                 .animation(spring, value: hot)
             }
-            Text(t.center.isEmpty ? "🍋" : t.center).font(.system(size: 34)).scaleEffect(model.lemonHot ? 1.15 : 1).animation(spring, value: model.lemonHot)
+            Group {
+                if model.centerBack { Image(systemName: "chevron.left").font(.system(size: 26, weight: .bold)).foregroundStyle(model.lemonHot ? Color.white : t.text) }
+                else { Text(t.center.isEmpty ? "🍋" : t.center).font(.system(size: 34)) }
+            }.scaleEffect(model.lemonHot ? 1.15 : 1).animation(spring, value: model.lemonHot)
             if model.hubOn, model.pills > 0 {
                 Label("All modes", systemImage: "chevron.left").font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(t.text.opacity(0.8)).frame(width: 82, height: 22)
@@ -414,11 +439,11 @@ final class WheelHost: NSHostingView<WheelView> {
     }
     override func draggingEntered(_ s: NSDraggingInfo) -> NSDragOperation { operation(s) }
     override func draggingUpdated(_ s: NSDraggingInfo) -> NSDragOperation { operation(s) }
-    /// "+" only where a drop does something (a tool or the lemon), so the mode bar and hub wedges don't look droppable.
+    /// "+" only where a drop does something (a tool or the lemon), so the mode bar, hub wedges and back button don't look droppable.
     /// Takes whatever the source allows: insisting on .copy makes macOS refuse drops from apps that only offer move.
     private func operation(_ s: NSDraggingInfo) -> NSDragOperation {
         model.hover(at: point(s))
-        guard model.hovered != nil || model.lemonHot else { return [] }
+        guard model.hovered != nil || (model.lemonHot && !model.centerBack) else { return [] }
         let m = s.draggingSourceOperationMask
         return [.copy, .generic, .move, .link].first { m.contains($0) } ?? .copy
     }
@@ -426,13 +451,17 @@ final class WheelHost: NSHostingView<WheelView> {
     override func performDragOperation(_ s: NSDraggingInfo) -> Bool {
         let urls = s.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         model.hover(at: point(s))
-        let target = model.hovered, queue = model.lemonHot
+        let target = model.hovered, queue = model.lemonHot && !model.centerBack
         model.clearHover()
         if let target { onPick?(target, urls); return true }
         if queue { onQueue?(urls); return true }
         return false
     }
 }
+
+/// Glass in a window that isn't key is drawn flat, without Liquid Glass's lensing and rims: that's the Liquid Glass
+/// setting. Nonactivating, so it can be key while Lemon stays in the background and the drag's app stays frontmost.
+private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { PrefStore.shared.p.glass?.liquid ?? true } }
 
 /// Watches the whole system for a file drag that gets shaken, and shows the wheel under the pointer.
 @MainActor final class WheelController {
@@ -506,9 +535,9 @@ final class WheelHost: NSHostingView<WheelView> {
             // Only a drag that put files on the drag pasteboard counts, and only once the cheap shake check passes.
             // Shake (or hold Shift, like Tangerine) opens the wheel.
             let shaken = shake.add(NSEvent.mouseLocation, e.timestamp) || e.modifierFlags.contains(.shift)
-            guard down, !fired, shaken, pb.changeCount != dragCount,
-                  let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
-            fired = true   // once per drag, so an unsupported drag doesn't re-read the pasteboard on every move
+            guard down, !fired, shaken, pb.changeCount != dragCount else { return }
+            fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
+            guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
             let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
             if !flat.isEmpty { show(flat) }
         default: break
@@ -520,8 +549,9 @@ final class WheelHost: NSHostingView<WheelView> {
         // sample is read; the formats on offer come from the extensions found.
         var files: [URL] = []
         for u in urls {
-            guard u.hasDirectoryPath else { files.append(u); continue }
-            guard let it = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { continue }
+            // A package (an app, a Photos library) is one item, not a folder to look inside.
+            guard u.hasDirectoryPath, !NSWorkspace.shared.isFilePackage(atPath: u.path) else { files.append(u); continue }
+            guard let it = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             var scanned = 0
             // ponytail: first 5,000 entries; a rare type deep in a huge folder may be missed (the drop still adds all).
             while scanned < 5_000, let f = it.nextObject() as? URL { scanned += 1; if kindOf[ext(of: f)] != nil { files.append(f) } }
@@ -530,7 +560,7 @@ final class WheelHost: NSHostingView<WheelView> {
         guard !model.modes.isEmpty else { return }
         installKeyTap()   // in case permission was granted since launch
         if panel == nil {
-            let p = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            let p = WheelPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.level = .popUpMenu
             p.hidesOnDeactivate = false; p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             let host = WheelHost(model: model)
@@ -544,7 +574,7 @@ final class WheelHost: NSHostingView<WheelView> {
             o.x = min(max(o.x, f.minX), f.maxX - s); o.y = min(max(o.y, f.minY), f.maxY - s)
         }
         panel?.setFrame(NSRect(origin: o, size: NSSize(width: s, height: s)), display: true)
-        panel?.orderFrontRegardless()
+        panel?.orderFrontRegardless(); panel?.makeKey()
         if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
         withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) { model.shown = true }
     }
