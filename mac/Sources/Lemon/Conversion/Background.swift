@@ -133,7 +133,9 @@ enum BiRefNetRunner {
         timer.resume()
         let out: [Float]
         do { defer { timer.cancel(); runLock.unlock() }; out = try predict(session(m), input) }
-        lock.lock(); lastRun[m.file] = Date().timeIntervalSince(start); lock.unlock()
+        // Idle counts from the end of a run: a long one (Full on a big queue) mustn't let the release drop the session
+        // just before the next file needs it.
+        lock.lock(); lastRun[m.file] = Date().timeIntervalSince(start); lastUse = Date(); lock.unlock()
         progress(0.86)
         guard out.count >= n else { throw LemonError(message: "Background removal failed: unexpected model output.") }
 

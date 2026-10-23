@@ -69,8 +69,11 @@ enum JobState: Equatable {
         for u in urls {
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir) else { continue }
-            let found = isDir.boolValue
-                ? (FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])?.allObjects as? [URL] ?? [])
+            // A dropped package is one item too, not a folder to look inside.
+            let found = isDir.boolValue && !NSWorkspace.shared.isFilePackage(atPath: u.path)
+                // Not into packages: a Photos library or an app bundle is one thing to the user, and its insides aren't
+                // theirs to add converted copies to.
+                ? (FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles, .skipsPackageDescendants])?.allObjects as? [URL] ?? [])
                 : [u]
             for f in found where kindOf[ext(of: f)] != nil && seen.insert(f.standardizedFileURL).inserted { out.append(f) }
         }
@@ -142,17 +145,19 @@ enum JobState: Equatable {
                     await g.next(); active -= 1
                 }
             }
-            waiting.removeAll()   // after Cancel, the rest stay in the list, waiting
+            // Cancel already emptied `waiting`; anything in it now joined after the loop's last look (the main actor can
+            // run between the group's end and here), so it starts in the next batch along with `late`.
+            let next = late + waiting
+            waiting.removeAll(); late = []
             poll?.cancel()
             refreshOverall()
             running = false; batch = []; queued = []
             progress.overall = nil
-            // Jobs that finished or were cancelled; ones dropped on the wheel after Cancel are reported with their own batch.
-            let lateIDs = Set(late.map(ObjectIdentifier.init))
-            let report = wheelJobs.filter { !lateIDs.contains(ObjectIdentifier($0)) }
-            wheelJobs.removeAll { !lateIDs.contains(ObjectIdentifier($0)) }
+            // Jobs that finished or were cancelled; ones that run in the next batch are reported with it.
+            let nextIDs = Set(next.map(ObjectIdentifier.init))
+            let report = wheelJobs.filter { !nextIDs.contains(ObjectIdentifier($0)) }
+            wheelJobs.removeAll { !nextIDs.contains(ObjectIdentifier($0)) }
             if !report.isEmpty { notify(report) }
-            let next = late; late = []
             run(next)
         }
     }
@@ -194,7 +199,7 @@ enum JobState: Equatable {
         }
     }
     var parts = ["\(ok) of \(jobs.count) done"]
-    if same > 0 { parts.append("\(same) already optimized") }
+    if same > 0 { parts.append("\(same) left as they were") }   // already optimized, or already small enough
     if let m = failed.first { parts.append("\(failed.count) failed: \(m)") }
     let msg = parts.joined(separator: ", ")
     let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
@@ -233,8 +238,8 @@ struct ContentView: View {
         .frame(minWidth: 620, minHeight: 360)
         .overlay {
             if targeted {
-                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(tangerine.opacity(0.06))
-                    .strokeBorder(tangerine, lineWidth: 2).padding(8).allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.tint.opacity(0.06))
+                    .strokeBorder(.tint, lineWidth: 2).padding(8).allowsHitTesting(false)
                     .transition(.opacity.combined(with: .scale(scale: 1.02)))
             }
         }
@@ -298,11 +303,14 @@ struct BatchStatus: View {
 }
 
 /// The empty screen's lemon: bobs gently, and leans in when files are dragged over the window.
+/// The theme's emoji and accent, passed in: Bobbing hosts it in a view of its own, outside this one's environment.
 struct FloatingLemon: View {
     var targeted: Bool
+    @ObservedObject private var store = PrefStore.shared
     var body: some View {
-        Bobbing(content: Text("🍋").font(.system(size: 64)).padding(22)
-            .background(Circle().fill(tangerine.opacity(targeted ? 0.3 : 0.14))))
+        let t = store.p.theme
+        Bobbing(content: Text(t.center.isEmpty ? "🍋" : t.center).font(.system(size: 64)).padding(22)
+            .background(Circle().fill(t.accentColor.opacity(targeted ? 0.3 : 0.14))))
             .fixedSize()
             .scaleEffect(targeted ? 1.12 : 1)
     }
@@ -567,7 +575,7 @@ struct BackgroundSettings: View {
 @main struct LemonApp: App {
     @NSApplicationDelegateAdaptor(Delegate.self) private var delegate
     var body: some Scene {
-        Window("Lemon", id: "main") { ContentView().tint(tangerine) }
+        Window("Lemon", id: "main") { ContentView().modifier(Themed()) }
         Settings { SettingsView() }
         MenuBarExtra { 
             MenuStatus()

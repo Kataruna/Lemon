@@ -103,7 +103,8 @@ public sealed partial class JobViewModel : ObservableObject
 
     internal async Task RunAsync(ConversionService conversion, string? outputFolder)
     {
-        if (SelectedPreset is not { } preset)
+        // Canceled while it was about to start (the queue yields once before calling this): it stays canceled.
+        if (SelectedPreset is not { } preset || Status != JobStatus.Queued)
             return;
 
         _cts = new CancellationTokenSource();
