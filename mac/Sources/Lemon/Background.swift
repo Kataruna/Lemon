@@ -174,7 +174,10 @@ enum BiRefNetRunner {
         guard tasks[m.file] == nil else { return }
         error = nil; progress[m.file] = 0
         tasks[m.file] = Task {
-            do { try await m.download { p in Task { @MainActor in if self.progress[m.file] != nil { self.progress[m.file] = p } } } }
+            // The download reports every chunk; redrawing Settings for each is wasted work, so only 0.5% steps get through.
+            do { try await m.download { p in Task { @MainActor in
+                if let old = self.progress[m.file], p - old >= 0.005 || p >= 1 { self.progress[m.file] = p }
+            } } }
             catch is CancellationError {}
             catch let e as LemonError { error = e.message }
             catch { if (error as? URLError)?.code != .cancelled { self.error = error.localizedDescription } }

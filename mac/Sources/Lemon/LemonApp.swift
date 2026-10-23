@@ -6,6 +6,10 @@ enum JobState: Equatable {
     var finished: Bool { if case .idle = self { return false }; if case .running = self { return false }; return true }
     /// How far along this job is, for the overall progress.
     var fraction: Double { if case .running(let p) = self { return p ?? 0 }; return finished ? 1 : 0 }
+    /// Which case, ignoring the payload: what row animations key on, so progress ticks don't each start one.
+    var phase: Int {
+        switch self { case .idle: 0; case .running(let p): p == nil ? 1 : 2; case .done: 3; case .note: 4; case .failed: 5 }
+    }
 }
 
 @MainActor final class Job: ObservableObject, Identifiable {
@@ -52,6 +56,10 @@ enum JobState: Equatable {
     private var wheelJobs: [Job] = []
     /// Jobs asked to run that haven't started yet.
     private var waiting: [Job] = []
+    /// Everything in `batch` and `late`, for a quick "already asked to run?" check (a big batch is thousands of jobs).
+    private var queued = Set<ObjectIdentifier>()
+    /// Asked to run after Cancel, while the cancelled batch winds down: they start once it has.
+    private var late: [Job] = []
     private var cancelled = false
 
     /// Files (folders are searched) Lemon can convert, in order, without duplicates.
@@ -86,7 +94,7 @@ enum JobState: Equatable {
             let j = Job(u, options: options)
             added.append(j); result.append(j)
         }
-        jobs += added   // one change notification, not one per file
+        withAnimation(added.count <= 200 ? .snappy : nil) { jobs += added }   // one change notification, not one per file
         return result
     }
 
@@ -107,12 +115,16 @@ enum JobState: Equatable {
 
     /// Converts these jobs (the ones still waiting). While a batch runs, they join it.
     private func run(_ candidates: [Job]) {
-        let new = candidates.filter { j in j.state == .idle && j.preset != nil && !waiting.contains { $0 === j } && !batch.contains { $0 === j } }
+        let new = candidates.filter { j in j.state == .idle && j.preset != nil && !queued.contains(ObjectIdentifier(j)) }
         guard !new.isEmpty else { return }
-        waiting += new
-        if running { batch += new; return }   // the running loop picks them up as slots free
+        queued.formUnion(new.map(ObjectIdentifier.init))
+        if running {
+            // The running loop picks them up as slots free; after Cancel it won't, so they wait for the next batch.
+            if cancelled { late += new } else { waiting += new; batch += new }
+            return
+        }
         running = true; cancelled = false
-        batch = new; refreshOverall()
+        waiting = new; batch = new; refreshOverall()
         // Sample rather than observe every job: each file can report hundreds of updates.
         poll?.cancel()
         poll = Task { while !Task.isCancelled { refreshOverall(); try? await Task.sleep(nanoseconds: 200_000_000) } }
@@ -132,9 +144,15 @@ enum JobState: Equatable {
             waiting.removeAll()   // after Cancel, the rest stay in the list, waiting
             poll?.cancel()
             refreshOverall()
-            running = false; batch = []
+            running = false; batch = []; queued = []
             progress.overall = nil
-            if !wheelJobs.isEmpty { notify(wheelJobs); wheelJobs = [] }
+            // Jobs that finished or were cancelled; ones dropped on the wheel after Cancel are reported with their own batch.
+            let lateIDs = Set(late.map(ObjectIdentifier.init))
+            let report = wheelJobs.filter { !lateIDs.contains(ObjectIdentifier($0)) }
+            wheelJobs.removeAll { !lateIDs.contains(ObjectIdentifier($0)) }
+            if !report.isEmpty { notify(report) }
+            let next = late; late = []
+            run(next)
         }
     }
 
@@ -146,9 +164,14 @@ enum JobState: Equatable {
         if progress.counts.done != done || progress.counts.total != batch.count { progress.counts = (done, batch.count) }
     }
 
-    func cancel() { cancelled = true; task?.cancel() }
+    func cancel() {
+        cancelled = true; task?.cancel()
+        // Not started, and now won't be: free them so dropping them on the wheel again runs them after the wind-down.
+        for j in waiting + late { queued.remove(ObjectIdentifier(j)) }
+        waiting.removeAll(); late.removeAll()
+    }
     /// While converting, only finished rows go; when idle, the whole list does.
-    func clear() { jobs.removeAll { running ? $0.state.finished : true } }
+    func clear() { withAnimation(.snappy) { jobs.removeAll { running ? $0.state.finished : true } } }
 
     func setAll(_ kind: Kind, _ name: String) {
         for j in jobs where kindOf[ext(of: j.url)] == kind && j.state == .idle {
@@ -187,14 +210,13 @@ struct ContentView: View {
         Group {
             if queue.jobs.isEmpty {
                 VStack(spacing: 14) {
-                    Text("🍋").font(.system(size: 64)).padding(22)
-                        .background(Circle().fill(tangerine.opacity(targeted ? 0.3 : 0.14)))
-                        .scaleEffect(targeted ? 1.08 : 1)
+                    FloatingLemon(targeted: targeted)
                     Text("Drop files or folders here").font(.title3.weight(.medium))
                     Text("Or shake / Shift-drag files anywhere for the wheel").font(.callout).foregroundStyle(.secondary)
                     Button { picking = true } label: { Label("Choose Files…", systemImage: "plus") }
                         .glassButton().controlSize(.large).padding(.top, 4)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .transition(.opacity.combined(with: .scale(scale: 0.94)))
             } else {
                 // Rows are content, so they sit on the see-through window as plain cards; glass is kept for controls.
                 List(queue.jobs) {
@@ -204,16 +226,19 @@ struct ContentView: View {
                 }
                 .scrollContentBackground(.hidden)
                 .safeAreaInset(edge: .bottom) { actionBar.padding(.bottom, 14) }
+                .transition(.opacity)
             }
         }
         .frame(minWidth: 620, minHeight: 360)
-        .animation(.spring(duration: 0.3), value: targeted)
         .overlay {
             if targeted {
                 RoundedRectangle(cornerRadius: 18, style: .continuous).fill(tangerine.opacity(0.06))
                     .strokeBorder(tangerine, lineWidth: 2).padding(8).allowsHitTesting(false)
+                    .transition(.opacity.combined(with: .scale(scale: 1.02)))
             }
         }
+        .animation(.spring(duration: 0.3), value: targeted)
+        .animation(.spring(duration: 0.4), value: queue.jobs.isEmpty)
         .seeThroughWindow()
         .dropDestination(for: URL.self, action: { urls, _ in queue.add(urls); return true }, isTargeted: { targeted = $0 })
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item, .folder], allowsMultipleSelection: true) { if case .success(let u) = $0 { queue.add(u) } }
@@ -241,14 +266,18 @@ struct ContentView: View {
         GlassBox {
             HStack(spacing: 12) {
                 BatchStatus(progress: queue.progress)
-                if queue.running { Button("Cancel", role: .cancel) { queue.cancel() }.glassButton().controlSize(.large).tint(nil as Color?) }
-                else {
+                if queue.running {
+                    Button("Cancel", role: .cancel) { queue.cancel() }.glassButton().controlSize(.large).tint(nil as Color?)
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
+                } else {
                     Button { queue.start() } label: { Label("Convert", systemImage: "arrow.triangle.2.circlepath") }
                         .glassButton(prominent: true).controlSize(.large)
                         .disabled(!queue.jobs.contains { $0.state == .idle && $0.preset != nil })
+                        .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
             }
         }
+        .animation(.spring(duration: 0.35, bounce: 0.25), value: queue.running)
     }
 }
 
@@ -262,7 +291,51 @@ struct BatchStatus: View {
                 Text("\(progress.counts.done)/\(progress.counts.total) · \(Int(p * 100))%").font(.callout.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
             }
             .padding(.horizontal, 14).frame(height: 36).glassCapsule()
+            .transition(.move(edge: .trailing).combined(with: .opacity))
         }
+    }
+}
+
+/// The empty screen's lemon: bobs gently, and leans in when files are dragged over the window.
+struct FloatingLemon: View {
+    var targeted: Bool
+    var body: some View {
+        Bobbing(content: Text("🍋").font(.system(size: 64)).padding(22)
+            .background(Circle().fill(tangerine.opacity(targeted ? 0.3 : 0.14))))
+            .fixedSize()
+            .scaleEffect(targeted ? 1.12 : 1)
+    }
+}
+
+/// Plays the bob as a Core Animation layer animation, which the window server runs on its own. A SwiftUI
+/// phaseAnimator re-laid-out the whole window every frame instead: ~14% CPU with the window just sitting open.
+struct Bobbing<Content: View>: NSViewRepresentable {
+    let content: Content
+    func makeNSView(context: Context) -> BobView<Content> { BobView(rootView: content) }
+    func updateNSView(_ v: BobView<Content>, context: Context) { v.rootView = content }
+}
+
+final class BobView<Content: View>: NSHostingView<Content> {
+    override func layout() {
+        super.layout()
+        wantsLayer = true
+        guard let l = layer, bounds.width > 0, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        // Rebuilt only when the size changes: the turn is about the view's center.
+        let key = "bob \(bounds.size)"
+        guard l.animation(forKey: key) == nil else { return }
+        l.removeAllAnimations()
+        // Layer space is y-up with counterclockwise angles: 3 pt down and 3° clockwise, to 5 pt up and 4° the other way.
+        let c = CGPoint(x: bounds.midX, y: bounds.midY)
+        func pose(_ y: CGFloat, _ degrees: CGFloat) -> NSValue {
+            var m = CATransform3DMakeTranslation(c.x, c.y + y, 0)
+            m = CATransform3DRotate(m, degrees * .pi / 180, 0, 0, 1)
+            return NSValue(caTransform3D: CATransform3DTranslate(m, -c.x, -c.y, 0))
+        }
+        let a = CABasicAnimation(keyPath: "transform")
+        a.fromValue = pose(-3, -3); a.toValue = pose(5, 4)
+        a.duration = 1.8; a.autoreverses = true; a.repeatCount = .infinity
+        a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        l.add(a, forKey: key)
     }
 }
 
@@ -273,25 +346,32 @@ struct JobRow: View {
             Image(nsImage: job.icon).resizable().frame(width: 28, height: 28)
             Text(job.url.lastPathComponent).lineLimit(1).truncationMode(.middle)
             Spacer()
-            switch job.state {
-            case .idle:
-                if job.options.isEmpty { Text("No converter installed").foregroundStyle(.secondary) }
-                else {
-                    Picker("", selection: $job.preset) { ForEach(job.options) { Text($0.name).tag(Optional($0)) } }
-                        .labelsHidden().frame(width: 210)
-                }
-            case .running(let p):
-                if let p {
-                    ProgressView(value: p).frame(width: 140)
-                    Text("\(Int(p * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 34, alignment: .trailing)
-                } else { ProgressView().controlSize(.small) }
-            case .done(let n): Label(n, systemImage: "checkmark.circle.fill").foregroundStyle(.green).lineLimit(1).truncationMode(.middle)
-            case .note(let m): Label(m, systemImage: "equal.circle").foregroundStyle(.secondary)
-            case .failed(let m): Label(m, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).lineLimit(2).help(m)
-            }
+            Group { status }
+                .transition(.asymmetric(insertion: .scale(scale: 0.6).combined(with: .opacity), removal: .opacity))
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .background(.background.opacity(0.35), in: .rect(cornerRadius: 12, style: .continuous))
+        .animation(.spring(duration: 0.35, bounce: 0.3), value: job.state.phase)
+    }
+
+    @ViewBuilder private var status: some View {
+        switch job.state {
+        case .idle:
+            if job.options.isEmpty { Text("No converter installed").foregroundStyle(.secondary) }
+            else {
+                Picker("", selection: $job.preset) { ForEach(job.options) { Text($0.name).tag(Optional($0)) } }
+                    .labelsHidden().frame(width: 210)
+            }
+        case .running(let p):
+            if let p {
+                ProgressView(value: p).frame(width: 140)
+                Text("\(Int(p * 100))%").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 34, alignment: .trailing)
+            } else { ProgressView().controlSize(.small) }
+        case .done(let n):
+            Label(n, systemImage: "checkmark.circle.fill").foregroundStyle(.green).lineLimit(1).truncationMode(.middle)
+        case .note(let m): Label(m, systemImage: "equal.circle").foregroundStyle(.secondary)
+        case .failed(let m): Label(m, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).lineLimit(2).help(m)
+        }
     }
 }
 
@@ -362,64 +442,61 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// The menu bar icon: a lemon, or a progress ring around a small lemon while files convert.
+/// The menu bar icon: the app icon's lemon, or its slice filling up segment by segment while files convert.
 /// It also hands the app a way to open the main window, since it's the one view that's always alive.
 struct MenuBarIcon: View {
     @Environment(\.openWindow) private var open
     @ObservedObject private var progress = sharedQueue.progress
     var body: some View {
         // Every new image makes the status item redraw, and menu bar managers (Bartender) re-capture the item each time,
-        // so the ring moves in 5% steps and each step's image is drawn once and reused: ~20 changes per batch.
-        Image(nsImage: menuBarImage(step: progress.overall.map { Int(($0 * 20).rounded()) }))
+        // so the slice moves in 8 steps and each step's image is drawn once and reused.
+        Image(nsImage: menuBarImage(step: progress.overall.map { Int(($0 * 8).rounded(.down)) }))
             .onAppear { AppHooks.openWindow = { NSApp.setActivationPolicy(.regular); open(id: "main"); NSApp.activate(ignoringOtherApps: true) } }
     }
 }
 
-/// Lemon silhouette: a body with pointed tips, a highlight cut out of it, and a separate leaf.
-/// `scale` 1 fills an 18 pt icon. Built along the x axis, then tilted up to the right.
-private func lemonPath(center c: CGPoint, scale s: CGFloat) -> NSBezierPath {
-    let p = NSBezierPath()
-    p.move(to: NSPoint(x: -8.2, y: 0))
-    p.curve(to: NSPoint(x: 8.2, y: 0), controlPoint1: NSPoint(x: -5.4, y: 6.6), controlPoint2: NSPoint(x: 5.4, y: 6.6))
-    p.curve(to: NSPoint(x: -8.2, y: 0), controlPoint1: NSPoint(x: 5.4, y: -6.6), controlPoint2: NSPoint(x: -5.4, y: -6.6))
-    p.close()
-    p.append(NSBezierPath(ovalIn: NSRect(x: -4.6, y: 1.0, width: 4.0, height: 1.4)))   // highlight (even-odd hole)
-    // Leaf off the top tip, pointing up and away, with a gap so it reads as separate.
-    let leaf = NSBezierPath()
-    leaf.move(to: NSPoint(x: 0, y: 0))
-    leaf.curve(to: NSPoint(x: 4.4, y: 0), controlPoint1: NSPoint(x: 1.4, y: 2.2), controlPoint2: NSPoint(x: 3.2, y: 1.8))
-    leaf.curve(to: NSPoint(x: 0, y: 0), controlPoint1: NSPoint(x: 3.2, y: -1.2), controlPoint2: NSPoint(x: 1.4, y: -1.4))
-    var lt = AffineTransform(); lt.translate(x: 5.6, y: 2.6); lt.rotate(byDegrees: 100); leaf.transform(using: lt)
-    p.append(leaf)
-    p.windingRule = .evenOdd
-    var t = AffineTransform(); t.translate(x: c.x - 0.4 * s, y: c.y - 1.3 * s); t.scale(s * 0.95); t.rotate(byDegrees: 30); p.transform(using: t)
-    return p
+/// A layer of the app icon (mac/Lemon.icon): 1 the slice, 2 the half lemon, 3 its shine. From the app bundle, or from
+/// the source tree under `swift run`.
+private func iconLayer(_ n: Int) -> NSImage {
+    let name = "Lemon \(n)"
+    let url = Bundle.main.url(forResource: name, withExtension: "svg")
+        ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Lemon.icon/Assets/\(name).svg")
+    return NSImage(contentsOf: url) ?? NSImage()
 }
 
 @MainActor private var menuBarImages: [Int: NSImage] = [:]
+/// Read and parsed once; every progress step draws from them.
+@MainActor private let iconLayers = (iconLayer(1), iconLayer(2), iconLayer(3))
 
-/// `step` 0...20 is the ring in 5% steps; nil is the plain lemon. Cached, so the same step is the same image.
+/// `step` 0...8 is how many of the slice's segments are lit; nil is the plain icon. Cached, so the same step is the same image.
 @MainActor func menuBarImage(step: Int?) -> NSImage {
     let key = step ?? -1
     if let cached = menuBarImages[key] { return cached }
-    let image = menuBarImage(progress: step.map { Double($0) / 20 })
+    let image = menuBarImage(drawing: step)
     menuBarImages[key] = image
     return image
 }
 
-private func menuBarImage(progress: Double?) -> NSImage {
+/// Template images only use alpha. The layers are drawn on a 1024 canvas; the numbers below are where their art sits.
+@MainActor private func menuBarImage(drawing step: Int?) -> NSImage {
+    let (slice, half, shine) = iconLayers
     let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { r in
-        let c = CGPoint(x: r.midX, y: r.midY)
-        NSColor.black.setFill(); NSColor.black.setStroke()
-        guard let progress else { lemonPath(center: c, scale: 1).fill(); return true }
-        // Template images only use alpha: a faint track, a solid arc from 12 o'clock clockwise, a small lemon inside.
-        let track = NSBezierPath(ovalIn: r.insetBy(dx: 1.5, dy: 1.5)); track.lineWidth = 2
-        NSColor.black.withAlphaComponent(0.3).setStroke(); track.stroke()
-        let arc = NSBezierPath()
-        arc.appendArc(withCenter: c, radius: 7.5, startAngle: 90, endAngle: 90 - 360 * max(progress, 0.02), clockwise: true)
-        arc.lineWidth = 2; arc.lineCapStyle = .round
-        NSColor.black.setStroke(); arc.stroke()
-        lemonPath(center: c, scale: 0.5).fill()
+        guard let step else {
+            // The half lemon over the slice, shine cut out. The art spans 235...776.
+            let k = r.width / 551, art = NSRect(x: -230 * k, y: -243 * k, width: 1024 * k, height: 1024 * k)
+            slice.draw(in: art); half.draw(in: art)
+            shine.draw(in: art, from: .zero, operation: .destinationOut, fraction: 1)
+            return true
+        }
+        // Just the slice (centered at 524, 500), faint, with its segments lighting up clockwise from 12 o'clock.
+        let k = r.width / 490, art = NSRect(x: -279 * k, y: -255 * k, width: 1024 * k, height: 1024 * k)
+        slice.draw(in: art, from: .zero, operation: .sourceOver, fraction: 0.3)
+        guard step > 0 else { return true }
+        let c = NSPoint(x: r.midX, y: r.midY), pie = NSBezierPath()
+        pie.move(to: c)
+        pie.appendArc(withCenter: c, radius: r.width, startAngle: 90, endAngle: 90 - 45 * CGFloat(step), clockwise: true)
+        pie.close(); pie.addClip()
+        slice.draw(in: art)
         return true
     }
     image.isTemplate = true
@@ -451,7 +528,7 @@ struct MenuStatus: View {
     }
 }
 
-struct SettingsView: View {
+struct BackgroundSettings: View {
     @ObservedObject private var store = ModelStore.shared
     var body: some View {
         Form {
@@ -482,9 +559,7 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped).frame(width: 480).tint(tangerine)
-        // Not seeThroughWindow(): on the Settings window that hides the close/minimise/zoom buttons.
-        .scrollContentBackground(.hidden).background(DesktopBlur().ignoresSafeArea())
+        .settingsPage()
     }
 }
 
