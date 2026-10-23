@@ -54,15 +54,18 @@ The numbers below are for *Balanced*; *Smaller* values follow in brackets. *Loss
 
 ## Build and run
 
-Requires the .NET 10 SDK (pinned in `global.json`). Visual Studio isn't required.
+The Windows app lives in `windows/`. It requires the .NET 10 SDK (pinned in `windows/global.json`). Visual Studio isn't required.
 
 ```powershell
+cd windows
 dotnet build                                   # x64; for ARM64: dotnet build src/Lemon.App -p:Platform=ARM64
 src\Lemon.App\bin\x64\Debug\net10.0-windows10.0.22621.0\win-x64\Lemon.exe
 dotnet test --project tests/Lemon.Core.Tests
 ```
 
 ## Packaging
+
+The scripts are in `windows/` and write to `windows\dist\`.
 
 | Script | Output | |
 |---|---|---|
@@ -78,26 +81,37 @@ Command line: `Lemon.exe [--background] [--to <ext> | --optimize] <files or fold
 ## Layout
 
 ```
-make-*.ps1, make-icon.cs        Build scripts (see Packaging)
-installer/Lemon.iss             Inno Setup script
-src/Lemon.Core/                 Everything that isn't UI
-  Formats/                      Known file types and kinds (image, audio, video, document)
-  Presets/                      Preset model, the built-in presets, user presets on disk
-  Conversion/                   ConversionService: picks a converter, reserves a unique output name, cleans up
-    Converters/                 ImageMagick, FFmpeg, Markdown, Pandoc, LibreOffice, and the Optimize converters
-  ExternalTools/                Finding and running ffmpeg/pandoc/soffice/gswin64c (killed with Lemon via a job object)
-  Configuration/                Settings and JSON storage in %LOCALAPPDATA%\Lemon
-  Shell/                        Explorer right-click menu, start with Windows
-  Wheel/                        Shake detection and which presets go on the wheel
-  LaunchRequest.cs              Command-line parsing
-src/Lemon.App/                  WinUI 3 app (unpackaged, self-contained Windows App SDK)
-  Program.cs, App.xaml          Single-instance startup, tray, batch notifications
-  Views/                        Main window and the Convert, Presets and Settings pages
-  ViewModels/                   Queue scheduler, per-file job state, preset editor
-  Wheel/                        Global drag-gesture hooks and the animated round format picker
-  Shell/                        Notification-area (tray) icon and notifications
-  Interop/                      Win32 declarations
-tests/Lemon.Core.Tests/         Same folders as Lemon.Core; Conversion/ also converts real generated media
+README.md
+windows/                          Windows 11 app (.NET 10, WinUI 3)
+  Lemon.slnx, global.json
+  make-*.ps1, make-icon.cs        Build scripts (see Packaging)
+  installer/Lemon.iss             Inno Setup script
+  src/Lemon.Core/                 Everything that isn't UI
+    Formats/                      Known file types and kinds (image, audio, video, document)
+    Presets/                      Preset model, the built-in presets, user presets on disk
+    Conversion/                   ConversionService: picks a converter, reserves a unique output name, cleans up
+      Converters/                 ImageMagick, FFmpeg, Markdown, Pandoc, LibreOffice, and the Optimize converters
+    ExternalTools/                Finding and running ffmpeg/pandoc/soffice/gswin64c (killed with Lemon via a job object)
+    Configuration/                Settings and JSON storage in %LOCALAPPDATA%\Lemon
+    Shell/                        Explorer right-click menu, start with Windows
+    Wheel/                        Shake detection and which presets go on the wheel
+    LaunchRequest.cs              Command-line parsing
+  src/Lemon.App/                  WinUI 3 app (unpackaged, self-contained Windows App SDK)
+    Program.cs, App.xaml          Single-instance startup, tray, batch notifications
+    Views/                        Main window and the Convert, Presets and Settings pages
+    ViewModels/                   Queue scheduler, per-file job state, preset editor
+    Wheel/                        Global drag-gesture hooks and the animated round format picker
+    Shell/                        Notification-area (tray) icon and notifications
+    Interop/                      Win32 declarations
+  tests/Lemon.Core.Tests/         Same folders as Lemon.Core; Conversion/ also converts real generated media
+mac/                              macOS 14+ app (SwiftUI, Swift package)
+  Package.swift, make-app.sh      make-app.sh builds mac/dist/Lemon.app
+  Lemon.icon/                     App icon (Icon Composer); the menu bar icon is drawn from its layers
+  Sources/Lemon/
+    App/                          App entry, queue, main window, menu bar
+    Wheel/                        Shake detection, rings, hub and the floating wheel
+    Conversion/                   Presets, converters (ImageMagick, FFmpeg, Pandoc, LibreOffice, Ghostscript), BiRefNet
+    Settings/                     Wheel look, rings, custom presets
 ```
 
 ## macOS version
@@ -110,6 +124,8 @@ mac/make-app.sh      # builds mac/dist/Lemon.app (ad-hoc signed)
 
 **Progress.** Every file shows its real progress: FFmpeg's encode position, ImageMagick's load/process/save meters, Ghostscript's pages, Optimize's candidate steps, and BiRefNet's stages (the model run itself is paced by how long the last one took). While anything converts, the lemon in the menu bar turns into a progress ring for the whole batch, the menu shows "Converting 3 of 7 · 42%" with Cancel, and the window toolbar shows the same as a bar.
 
-**Wheel.** Lemon stays in the menu bar. While dragging files from anywhere, shake the mouse (or hold Shift, like Tangerine) and the wheel pops up under the pointer: drop on a format to convert next to the originals (a notification reports the result), drop on the lemon to add to the queue. The wheel has up to three rings: **Convert**, **Optimize** and **Cut out** (remove the background onto a transparent `name (no background).png`). Cut out offers *Apple Vision* (built in, quick) and, like the Windows build, *BiRefNet Lite / Full quality*: the same pinned models, downloaded in *Settings › Background remover* (SHA-256 checked, stored in `~/Library/Application Support/Lemon/models`), run on the Mac's CPU with ONNX Runtime (about 6 s per image for Lite; ONNX Runtime 1.19's Core ML provider can't compile BiRefNet). While cutting out, the Lite model uses about 6.5 GB of memory; Lemon runs one image at a time and frees the model 20 seconds after the last one. BiRefNet handles large images and fine edges better; when Vision fails on a file, a downloaded BiRefNet model finishes it. Press **Tab** (Shift+Tab goes back) to cycle them or **1 / 2 / 3** to jump to one, or scroll, or rest the files on the mode bar under the ring. The keys need Accessibility permission (Lemon asks on first launch); without it, scrolling and the mode bar still work. It watches the mouse globally, which macOS allows without any permission. Releasing the mouse elsewhere closes the wheel.
+**Wheel.** Lemon stays in the menu bar. While dragging files from anywhere, shake the mouse (or hold Shift, like Tangerine) and the wheel pops up under the pointer: drop on a format to convert next to the originals (a notification reports the result), drop on the lemon to add to the queue. The wheel has up to three rings: **Convert**, **Optimize** and **Cut out** (remove the background onto a transparent `name (no background).png`). Cut out offers *Apple Vision* (built in, quick) and, like the Windows build, *BiRefNet Lite / Full quality*: the same pinned models, downloaded in *Settings › Background remover* (SHA-256 checked, stored in `~/Library/Application Support/Lemon/models`), run on the Mac's CPU with ONNX Runtime (about 6 s per image for Lite; ONNX Runtime 1.19's Core ML provider can't compile BiRefNet). While cutting out, the Lite model uses about 6.5 GB of memory; Lemon runs one image at a time and frees the model 20 seconds after the last one. BiRefNet handles large images and fine edges better; when Vision fails on a file, a downloaded BiRefNet model finishes it. Press **Tab** (Shift+Tab goes back) to cycle them or **1–9** to jump to one (**0** for the hub), or scroll, or rest the files on a ring's name in the mode bar under the ring. The keys need Accessibility permission (Lemon asks on first launch); without it, scrolling and the mode bar still work. It watches the mouse globally, which macOS allows without any permission. Releasing the mouse elsewhere closes the wheel.
 
-Not ported: the Space key, the shake/key settings, the right-click menu and custom preset editing.
+**Customizing.** *Settings › Wheel* sets the look (themes including the macOS accent color, glass blur and opacity, the center emoji, text color), which formats go on the Convert ring for each kind of file, and which built-in rings show. You can make your own rings from any mix of presets (say, Optimize and Remove background together), open the wheel on a hub of rings, or pick the ring each kind of file opens on. *Settings › Presets* makes custom presets (format plus quality, size, bitrate, CRF, frame rate, metadata); they show up in the window and can go on the wheel.
+
+Not ported: the Space key, the shake/key settings and the right-click menu.

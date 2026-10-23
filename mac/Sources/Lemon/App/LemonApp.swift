@@ -460,7 +460,7 @@ struct MenuBarIcon: View {
 private func iconLayer(_ n: Int) -> NSImage {
     let name = "Lemon \(n)"
     let url = Bundle.main.url(forResource: name, withExtension: "svg")
-        ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Lemon.icon/Assets/\(name).svg")
+        ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../Lemon.icon/Assets/\(name).svg")
     return NSImage(contentsOf: url) ?? NSImage()
 }
 
