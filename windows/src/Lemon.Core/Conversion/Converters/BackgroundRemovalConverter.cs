@@ -40,6 +40,28 @@ public sealed class BackgroundRemovalConverter : IConverter
     private static InferenceSession Session(BackgroundModel model, bool gpu) =>
         Sessions.GetOrAdd((model, gpu), k => new Lazy<InferenceSession>(() => OpenSession(BackgroundModelInfo.Get(k.Item1).Path, gpu))).Value;
 
+    /// <summary>
+    /// A loaded model plus its working memory is several GB, and Lemon sits in the tray for days, so the sessions are
+    /// let go once no job has used them for this long. Reloading takes a second or two.
+    /// </summary>
+    private static readonly TimeSpan IdleRelease = TimeSpan.FromSeconds(30);
+    private static readonly Lock SessionGate = new();
+    private static int _jobsRunning;
+    private static Timer? _release;
+
+    private static void ReleaseIdleSessions()
+    {
+        lock (SessionGate)
+        {
+            // A job may have started since the timer fired; it needs its session.
+            if (_jobsRunning > 0)
+                return;
+            foreach (var key in Sessions.Keys)
+                if (Sessions.TryRemove(key, out var session) && session.IsValueCreated)
+                    session.Value.Dispose();
+        }
+    }
+
     public string Name => "BiRefNet";
     public ExternalTool? RequiredTool => null;
 
@@ -54,6 +76,8 @@ public sealed class BackgroundRemovalConverter : IConverter
         Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
+            lock (SessionGate)
+                _jobsRunning++;
             try
             {
                 using var image = new MagickImage(request.InputPath);
@@ -98,6 +122,14 @@ public sealed class BackgroundRemovalConverter : IConverter
             catch (OnnxRuntimeException ex)
             {
                 throw new ConversionException("Background removal failed: " + ex.Message);
+            }
+            finally
+            {
+                lock (SessionGate)
+                {
+                    if (--_jobsRunning == 0)
+                        (_release ??= new Timer(_ => ReleaseIdleSessions())).Change(IdleRelease, Timeout.InfiniteTimeSpan);
+                }
             }
             progress?.Report(1);
         }, cancellationToken);

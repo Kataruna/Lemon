@@ -14,6 +14,11 @@ public sealed partial class QueueViewModel : ObservableObject
     private readonly Dictionary<JobViewModel, Task> _running = [];
     /// <summary>Jobs started since the queue was last idle, for the overall progress and the "done" notification.</summary>
     private readonly HashSet<JobViewModel> _batch = [];
+    /// <summary>
+    /// Set while many jobs change at once (a folder added, a batch queued): the summary and progress are worked out
+    /// once at the end instead of after every file, which made dropping thousands of files take minutes.
+    /// </summary>
+    private bool _bulk;
 
     public QueueViewModel(AppSettings settings, PresetStore presets, ConversionService conversion)
     {
@@ -75,43 +80,63 @@ public sealed partial class QueueViewModel : ObservableObject
         var skipped = 0;
         var missingTools = new HashSet<ExternalTool>();
         var added = new List<JobViewModel>();
-        foreach (var path in ExpandFolders(paths))
+        var editable = new Dictionary<string, JobViewModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var j in Jobs.Where(j => j.IsEditable))
+            editable.TryAdd(j.InputPath, j);
+        // Presets depend only on the file type, so a folder of 5,000 photos is one lookup, not 5,000.
+        var presetsByType = new Dictionary<string, IReadOnlyList<Preset>>();
+        _bulk = true;
+        try
         {
-            if (!FormatCatalog.IsSupported(path))
+            foreach (var path in ExpandFolders(paths))
             {
-                skipped++;
-                continue;
-            }
-            if (Jobs.FirstOrDefault(j => j.IsEditable && string.Equals(j.InputPath, path, StringComparison.OrdinalIgnoreCase)) is { } waiting)
-            {
-                // Already waiting in the queue. A wheel format or right-click "To PNG" still means "convert it now
-                // like this", so reuse that row instead of silently doing nothing.
-                if (startWith is not null && waiting.AvailablePresets.FirstOrDefault(p => p.Id == startWith.Id) is { } fits)
+                if (!FormatCatalog.IsSupported(path))
                 {
-                    waiting.SelectedPreset = fits;
-                    added.Add(waiting);
+                    skipped++;
+                    continue;
                 }
-                else if (startWith is null && quickTarget is not null)
+                if (editable.TryGetValue(path, out var waiting))
                 {
-                    waiting.SelectedPreset = DefaultPreset(path, waiting.AvailablePresets, quickTarget);
-                    added.Add(waiting);
+                    // Already waiting in the queue. A wheel format or right-click "To PNG" still means "convert it now
+                    // like this", so reuse that row instead of silently doing nothing.
+                    if (startWith is not null && waiting.AvailablePresets.FirstOrDefault(p => p.Id == startWith.Id) is { } fits)
+                    {
+                        waiting.SelectedPreset = fits;
+                        added.Add(waiting);
+                    }
+                    else if (startWith is null && quickTarget is not null)
+                    {
+                        waiting.SelectedPreset = DefaultPreset(path, waiting.AvailablePresets, quickTarget);
+                        added.Add(waiting);
+                    }
+                    continue;
                 }
-                continue;
-            }
 
-            var presets = PresetsFor(path);
-            if (presets.Count == 0)
-            {
-                skipped++;
-                missingTools.UnionWith(_conversion.MissingToolsFor(path));
-                continue;
+                var type = FormatCatalog.NormalizeExtension(path);
+                if (!presetsByType.TryGetValue(type, out var presets))
+                {
+                    presetsByType[type] = presets = PresetsFor(path);
+                    if (presets.Count == 0)
+                        missingTools.UnionWith(_conversion.MissingToolsFor(path));
+                }
+                if (presets.Count == 0)
+                {
+                    skipped++;
+                    continue;
+                }
+                var preset = presets.FirstOrDefault(p => p.Id == startWith?.Id) ?? DefaultPreset(path, presets, quickTarget);
+                var job = new JobViewModel(path, presets, preset);
+                job.PropertyChanged += OnJobChanged;
+                Jobs.Add(job);
+                editable.TryAdd(path, job);
+                if (startWith is null || preset?.Id == startWith.Id)
+                    added.Add(job);
             }
-            var preset = presets.FirstOrDefault(p => p.Id == startWith?.Id) ?? DefaultPreset(path, presets, quickTarget);
-            var job = new JobViewModel(path, presets, preset);
-            job.PropertyChanged += OnJobChanged;
-            Jobs.Add(job);
-            if (startWith is null || preset?.Id == startWith.Id)
-                added.Add(job);
+        }
+        finally
+        {
+            _bulk = false;
+            UpdateSummary();
         }
 
         Notice = skipped switch
@@ -203,21 +228,43 @@ public sealed partial class QueueViewModel : ObservableObject
     /// <summary>Recomputes which presets fit each file, after presets change or tools are installed.</summary>
     public void RefreshPresets()
     {
-        foreach (var job in Jobs.Where(j => j.IsEditable))
+        var presetsByType = new Dictionary<string, IReadOnlyList<Preset>>();
+        _bulk = true;
+        try
         {
-            var presets = PresetsFor(job.InputPath);
-            job.UpdatePresets(presets, DefaultPreset(job.InputPath, presets, null));
+            foreach (var job in Jobs.Where(j => j.IsEditable))
+            {
+                var type = FormatCatalog.NormalizeExtension(job.InputPath);
+                if (!presetsByType.TryGetValue(type, out var presets))
+                    presetsByType[type] = presets = PresetsFor(job.InputPath);
+                job.UpdatePresets(presets, DefaultPreset(job.InputPath, presets, null));
+            }
+        }
+        finally
+        {
+            _bulk = false;
         }
         UpdateSummary();
     }
 
     private void Enqueue(IReadOnlyList<JobViewModel> jobs)
     {
-        foreach (var job in jobs.Where(j => j.SelectedPreset is not null))
+        _bulk = true;
+        try
         {
-            job.Status = JobStatus.Queued;
-            _batch.Add(job);
+            foreach (var job in jobs.Where(j => j.SelectedPreset is not null))
+            {
+                job.Status = JobStatus.Queued;
+                _batch.Add(job);
+            }
         }
+        finally
+        {
+            _bulk = false;
+        }
+        UpdateSummary();
+        if (_batch.Count > 0)
+            UpdateBatchProgress();
         Pump();
     }
 
@@ -341,8 +388,8 @@ public sealed partial class QueueViewModel : ObservableObject
 
     private void OnJobsChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        IsEmpty = Jobs.Count == 0;
-        UpdateSummary();
+        if (!_bulk)
+            UpdateSummary();
     }
 
     private void OnJobChanged(object? sender, PropertyChangedEventArgs e)
@@ -360,6 +407,8 @@ public sealed partial class QueueViewModel : ObservableObject
             }
         }
 
+        if (_bulk)
+            return;
         if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.SelectedPreset))
             UpdateSummary();
 
@@ -369,6 +418,7 @@ public sealed partial class QueueViewModel : ObservableObject
 
     private void UpdateSummary()
     {
+        IsEmpty = Jobs.Count == 0;
         HasStartableJobs = Jobs.Any(j => j.IsStartable);
         HasFinishedJobs = Jobs.Any(j => j.IsDone);
         HasOptimizableJobs = Jobs.Any(j => j.IsEditable && j.AvailablePresets.Any(p => p.IsOptimize));
@@ -382,7 +432,9 @@ public sealed partial class QueueViewModel : ObservableObject
             parts.Add($"{failed} failed");
         Summary = Jobs.Count == 0 ? "" : string.Join(" · ", parts);
 
-        var missing = Jobs.SelectMany(j => _conversion.MissingToolsFor(j.InputPath)).Distinct().ToList();
+        // Once per file type, not per file: this runs after every status change.
+        var missing = Jobs.Select(j => FormatCatalog.NormalizeExtension(j.InputPath)).Distinct()
+            .SelectMany(_conversion.MissingToolsFor).Distinct().ToList();
         MissingToolsMessage = missing.Count == 0
             ? null
             : "Install " + string.Join(" and ", missing.Select(ToolLocator.DisplayName)) + " to unlock more formats for these files: "

@@ -293,8 +293,9 @@ public sealed partial class WheelWindow : Window
         {
             var items = await e.DataView.GetStorageItemsAsync();
             var dragged = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
-            // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread.
-            _paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).Take(5000).ToList());
+            // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread. All of it: these
+            // are the files a drop converts, so a cap would silently leave the rest of a big folder out.
+            _paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).ToList());
         }
         catch (Exception)
         {

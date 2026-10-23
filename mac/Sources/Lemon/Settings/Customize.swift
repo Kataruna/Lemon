@@ -41,12 +41,13 @@ struct WheelTheme: Codable, Hashable {
     ]
 }
 
-/// How the wheel's glass looks. macOS has no blur-radius setting for Liquid Glass or materials, so blur is a choice of
-/// four looks, from none to heavy.
+/// How the wheel's glass looks. macOS has no blur-radius setting for Liquid Glass or materials, so frost (saved as
+/// `blur`) is a choice of four looks, from clear to heavy.
 struct GlassStyle: Codable, Equatable {
-    var blur = 2          // 0 none: a plain see-through pane, 1 light: clear glass, 2 standard glass, 3 heavy: glass over frost
+    var blur = 2          // 0 clear glass, 1 clear glass + light frost, 2 regular glass, 3 regular glass + heavy frost
     var opacity = 1.0     // of the glass layer; lower shows more of what's behind
-    static let blurNames = ["None", "Light", "Standard", "Heavy"]
+    var liquid: Bool? = nil   // false: the glass drawn flat, without lensing (Optional so older prefs decode)
+    static let blurNames = ["Clear", "Light", "Standard", "Heavy"]
 }
 
 struct Prefs: Codable, Equatable {
@@ -57,6 +58,7 @@ struct Prefs: Codable, Equatable {
     var hidden: Set<String>? = nil      // built-in rings switched off, by WheelMode id
     var rings: [CustomRing]? = nil
     var hub: Bool? = nil                // every file opens on the hub
+    var backPill: Bool? = nil           // back to the hub from a pill under the ring, instead of the center
     var start: [Kind: String]? = nil    // without the hub, the ring files of a kind open on; missing = the first ring
     var glass: GlassStyle? = nil
 }
@@ -107,9 +109,15 @@ func wheelCandidates(_ k: Kind) -> [Preset] {
 
 // MARK: settings
 
+/// The theme's accent on everything inside (buttons, toggles, pickers, progress), following changes as they're made.
+struct Themed: ViewModifier {
+    @ObservedObject private var store = PrefStore.shared
+    func body(content: Content) -> some View { content.tint(store.p.theme.accentColor) }
+}
+
 extension View {
     func settingsPage(height: CGFloat? = nil) -> some View {
-        formStyle(.grouped).frame(width: 500, height: height).tint(tangerine)
+        formStyle(.grouped).frame(width: 500, height: height).modifier(Themed())
             // Not seeThroughWindow(): on the Settings window that hides the close/minimise/zoom buttons.
             .scrollContentBackground(.hidden).background(DesktopBlur().ignoresSafeArea())
     }
@@ -166,12 +174,15 @@ struct WheelSettings: View {
             }
             Section {
                 let g = store.p.glass ?? GlassStyle()
-                Picker("Blur", selection: Binding(get: { g.blur }, set: { v in var x = g; x.blur = v; store.p.glass = x })) {
+                if #available(macOS 26, *) {
+                    Toggle("Liquid Glass", isOn: Binding(get: { g.liquid ?? true }, set: { v in var x = g; x.liquid = v; store.p.glass = x }))
+                }
+                Picker("Frost", selection: Binding(get: { g.blur }, set: { v in var x = g; x.blur = v; store.p.glass = x })) {
                     ForEach(GlassStyle.blurNames.indices, id: \.self) { Text(GlassStyle.blurNames[$0]).tag($0) }
                 }.pickerStyle(.segmented)
                 Slider(value: Binding(get: { g.opacity }, set: { v in var x = g; x.opacity = v; store.p.glass = x }), in: 0.3...1) { Text("Opacity") }
             } header: { Text("Glass") } footer: {
-                Text("None is a clear pane with no blur; Light uses Liquid Glass's clear style; Heavy frosts the glass further. Lower opacity shows more of what's behind the wheel.")
+                Text("Clear is Liquid Glass's clear style; Light frosts it a little; Standard is the regular style; Heavy frosts it further. The edges always bend what's behind. With Liquid Glass off, the same glass is drawn flat, frosted without bending. Lower opacity shows more of what's behind the wheel.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -201,6 +212,7 @@ struct WheelSettings: View {
             }
             Section {
                 Toggle("Open on the hub", isOn: Binding(get: { store.p.hub ?? false }, set: { store.p.hub = $0 }))
+                Toggle("Back to the hub from a button under the ring", isOn: Binding(get: { store.p.backPill ?? false }, set: { store.p.backPill = $0 }))
                 if !(store.p.hub ?? false) {
                     let rings = WheelMode.all.filter { !(store.p.hidden ?? []).contains($0.id) }
                     ForEach(Kind.allCases, id: \.self) { k in
@@ -212,7 +224,7 @@ struct WheelSettings: View {
                     }
                 }
             } header: { Text("Opens on") } footer: {
-                Text("The hub shows the rings as wedges for every kind of file; rest the files on one to open it. Without it, each kind opens on its own ring. With more than four rings, the hub is how you switch. If a ring has nothing for the files, the wheel opens on the hub or the first ring instead.")
+                Text("The hub shows the rings as wedges for every kind of file; rest the files on one to open it. Without it, each kind opens on its own ring. With more than four rings, the hub is how you switch. Inside a ring, rest on the center to go back to the hub, or turn on the button under the ring instead. If a ring has nothing for the files, the wheel opens on the hub or the first ring instead.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             slotsSection
@@ -226,6 +238,7 @@ struct WheelSettings: View {
         .onChange(of: store.p.rings) { reloadPreview() }
         .onChange(of: store.p.hidden) { reloadPreview() }
         .onChange(of: store.p.hub) { reloadPreview() }
+        .onChange(of: store.p.backPill) { reloadPreview() }
         .onChange(of: store.p.start) { reloadPreview() }
         .onChange(of: kind) { reloadPreview() }
     }
