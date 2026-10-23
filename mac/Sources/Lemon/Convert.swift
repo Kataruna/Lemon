@@ -7,8 +7,17 @@ struct LemonError: Error { let message: String }
 enum Tools {
     // GUI apps start with a bare PATH, so look in the Homebrew/MacPorts locations too.
     static let dirs = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/Applications/LibreOffice.app/Contents/MacOS"]
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cache: [String: (path: String?, at: Date)] = [:]
+
+    /// Listing presets asks this many times per file, so answers are cached for a few seconds;
+    /// a tool installed while Lemon runs still shows up right after.
     static func find(_ name: String) -> String? {
-        dirs.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+        lock.lock(); defer { lock.unlock() }
+        if let hit = cache[name], Date().timeIntervalSince(hit.at) < 5 { return hit.path }
+        let path = dirs.map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+        cache[name] = (path, Date())
+        return path
     }
     static func need(_ name: String) throws -> String {
         guard let p = find(name) else { throw LemonError(message: "\(name) isn't installed (brew install \(name == "magick" ? "imagemagick" : name == "gs" ? "ghostscript" : name == "soffice" ? "--cask libreoffice" : name))") }
@@ -18,12 +27,14 @@ enum Tools {
 
 private final class Box: @unchecked Sendable {
     let lock = NSLock(); var err = Data(), out = Data(); var proc: Process?
+    /// stderr is only kept for the error message, and progress meters can write megabytes of it.
+    private static let errTail = 64 << 10
     private var partial = [Data(), Data()]
     /// Stores a chunk and returns the complete lines in it; a line cut off at the chunk's end waits for the next one.
     /// Progress meters redraw with \r, so that ends a line too. `final` flushes the leftover.
     func append(_ d: Data, err isErr: Bool, final: Bool = false) -> [String] {
         lock.lock(); defer { lock.unlock() }
-        if isErr { err.append(d) } else { out.append(d) }
+        if isErr { err.append(d); if err.count > 2 * Self.errTail { err = err.suffix(Self.errTail) } } else { out.append(d) }
         let i = isErr ? 1 : 0
         partial[i].append(d)
         guard var text = String(data: partial[i], encoding: .utf8) else { return [] }
@@ -45,24 +56,26 @@ func run(_ exe: String, _ args: [String], onLine: (@Sendable (String) -> Void)? 
     p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
     p.standardOutput = out; p.standardError = err; p.standardInput = FileHandle.nullDevice
     box.proc = p
-    out.fileHandleForReading.readabilityHandler = { h in
-        let d = h.availableData
-        if !d.isEmpty { box.append(d, err: false).forEach { onLine?($0) } }
-    }
-    err.fileHandleForReading.readabilityHandler = { h in
-        let d = h.availableData
-        if !d.isEmpty { box.append(d, err: true).forEach { onErr?($0) } }
+    // Read each pipe until EOF, so the last lines (often the final progress line) arrive, in order, before we return.
+    let eof = DispatchGroup()
+    for (pipe, isErr) in [(out, false), (err, true)] {
+        eof.enter()
+        pipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData
+            if d.isEmpty { h.readabilityHandler = nil; eof.leave(); return }
+            box.append(d, err: isErr).forEach { (isErr ? onErr : onLine)?($0) }
+        }
     }
     let status: Int32 = try await withTaskCancellationHandler {
         try await withCheckedThrowingContinuation { c in
             p.terminationHandler = { c.resume(returning: $0.terminationStatus) }
             do { try p.run() } catch { c.resume(throwing: error) }
         }
-    } onCancel: { box.proc?.terminate() }
-    out.fileHandleForReading.readabilityHandler = nil; err.fileHandleForReading.readabilityHandler = nil
-    // Whatever the tool wrote just before exiting (often the final progress line) may not have been read yet.
-    box.append(out.fileHandleForReading.readDataToEndOfFile(), err: false, final: true).forEach { onLine?($0) }
-    box.append(err.fileHandleForReading.readDataToEndOfFile(), err: true, final: true).forEach { onErr?($0) }
+    } onCancel: { if box.proc?.isRunning == true { box.proc?.terminate() } }   // terminate() before launch raises
+    // A child the tool left running can hold a pipe open, so don't wait for EOF forever.
+    await withCheckedContinuation { c in DispatchQueue.global().async { _ = eof.wait(timeout: .now() + 2); c.resume() } }
+    box.append(Data(), err: false, final: true).forEach { onLine?($0) }
+    box.append(Data(), err: true, final: true).forEach { onErr?($0) }
     try Task.checkCancellation()
     guard status == 0 else {
         let lines = box.text(err: true).split(whereSeparator: { $0 == "\n" || $0 == "\r" }).map(String.init)
@@ -83,12 +96,34 @@ final class Meter: @unchecked Sendable {
 
 enum Outcome { case done(URL), alreadyOptimized }
 
-/// name.ext, or name (1).ext, ... – never overwrites.
-func uniqueURL(dir: URL, base: String, ext: String) -> URL {
-    var u = dir.appendingPathComponent("\(base).\(ext)"), n = 0
-    while FileManager.default.fileExists(atPath: u.path) { n += 1; u = dir.appendingPathComponent("\(base) (\(n)).\(ext)") }
+/// Moves the result to name.ext, or name (1).ext, ... – never overwrites. FileManager.moveItem checks then renames, so
+/// two parallel jobs that want the same name can both pass the check and one silently replaces the other (seen in
+/// testing); the kernel's exclusive rename, or an exclusive copy across volumes, claims the name atomically.
+func moveToUnique(_ tmp: URL, dir: URL, base: String, ext: String) throws -> URL {
+    for n in 0..<10_000 {
+        let u = dir.appendingPathComponent(n == 0 ? "\(base).\(ext)" : "\(base) (\(n)).\(ext)")
+        if renamex_np(tmp.path, u.path, UInt32(RENAME_EXCL)) == 0 { return u }
+        if errno == EEXIST { continue }
+        guard errno == EXDEV || errno == ENOTSUP else { break }   // other volume, or a file system without RENAME_EXCL
+        if copyfile(tmp.path, u.path, nil, copyfile_flags_t(COPYFILE_ALL | COPYFILE_EXCL)) == 0 { return u }
+        if errno == EEXIST { continue }
+        break
+    }
+    throw LemonError(message: "Couldn't save \(base).\(ext): \(String(cString: strerror(errno)))")
+}
+
+/// A private folder for a job's scratch files: on the source's volume, so the final move is a rename, but outside the
+/// user's folder (nothing is left there if Lemon dies mid-job) and free of % (ImageMagick expands %d in output names).
+private func scratchFolder(near dir: URL) -> URL {
+    let fm = FileManager.default
+    if let u = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: dir, create: true), !u.path.contains("%") { return u }
+    let u = fm.temporaryDirectory.appendingPathComponent("Lemon-\(UUID().uuidString)")
+    try? fm.createDirectory(at: u, withIntermediateDirectories: true)
     return u
 }
+
+/// CIContext is expensive to create and safe to share across threads.
+let sharedCIContext = CIContext()
 
 func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double?) -> Void) async throws -> Outcome {
     let fm = FileManager.default
@@ -96,8 +131,9 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
     let outExt = optimize ? srcExt : preset.ext
     let suffix = optimize ? " (optimized)" : preset.removeBackground != nil ? " (no background)" : ""
     let dir = src.deletingLastPathComponent()
-    let tmp = dir.appendingPathComponent(".lemon-\(UUID().uuidString).\(outExt)")
-    defer { try? fm.removeItem(at: tmp) }
+    let scratch = scratchFolder(near: dir)
+    let tmp = scratch.appendingPathComponent("lemon-\(UUID().uuidString).\(outExt)")
+    defer { try? fm.removeItem(at: scratch) }
 
     if let strength = preset.strength {
         try await optimizeFile(src, tmp, srcExt, strength, progress)
@@ -124,9 +160,7 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
         }
     }
     let base = src.deletingPathExtension().lastPathComponent + suffix
-    let final = uniqueURL(dir: dir, base: base, ext: outExt)
-    try fm.moveItem(at: tmp, to: final)
-    return .done(final)
+    return .done(try moveToUnique(tmp, dir: dir, base: base, ext: outExt))
 }
 
 // MARK: images
@@ -211,7 +245,7 @@ private func docConvert(_ src: URL, _ dst: URL, _ s: String, _ t: String) async 
     case .textutil: try await run("/usr/bin/textutil", ["-convert", t, "-output", dst.path, src.path])
     case .pandoc: try await run(try Tools.need("pandoc"), [src.path, "-s", "-o", dst.path])
     case .soffice:
-        let out = dst.deletingLastPathComponent().appendingPathComponent(".lemon-soffice-\(UUID().uuidString)")
+        let out = dst.deletingLastPathComponent().appendingPathComponent("soffice-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: out) }
         try await run(try Tools.need("soffice"), ["--headless", "--convert-to", t, "--outdir", out.path, src.path])
         let made = out.appendingPathComponent(src.deletingPathExtension().lastPathComponent + "." + t)
@@ -264,7 +298,7 @@ private func optimizeImage(_ src: URL, _ dst: URL, _ s: String, _ strength: Stre
     func step(_ sub: Double) { progress(min((done + sub) / steps, 1)) }
     func size(_ u: URL) -> Int { (try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max }
     func make(_ args: [String]) async throws -> URL {
-        let u = dst.deletingLastPathComponent().appendingPathComponent(".lemon-c-\(UUID().uuidString).\(s)")
+        let u = dst.deletingLastPathComponent().appendingPathComponent("candidate-\(UUID().uuidString).\(s)")
         let base = done
         try await runMagick(m, [src.path] + args + [u.path]) { p in progress(min((base + (p ?? 0)) / steps, 1)) }
         done += 1; step(0); return u
@@ -311,7 +345,7 @@ private func removeBackground(_ src: URL, _ dst: URL, _ progress: @escaping @Sen
     guard let result = request.results?.first, !result.allInstances.isEmpty else { throw LemonError(message: "No subject found to keep.") }
     let masked = try result.generateMaskedImage(ofInstances: result.allInstances, from: handler, croppedToInstancesExtent: false)
     let space = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!
-    try CIContext().writePNGRepresentation(of: CIImage(cvPixelBuffer: masked), to: dst, format: .RGBA8, colorSpace: space)
+    try sharedCIContext.writePNGRepresentation(of: CIImage(cvPixelBuffer: masked), to: dst, format: .RGBA8, colorSpace: space)
     progress(1)
 }
 
