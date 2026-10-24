@@ -160,6 +160,11 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
         // No ring chosen means the first one, as Settings shows; the hub only when asked for, or the chosen ring is empty.
         inHub = hubOn && ring == nil && start != nil
     }
+    /// Just these presets on one ring, as the welcome guide's demo shows it.
+    func load(demo presets: [Preset]) {
+        byMode = [.convert: presets]; modes = [.convert]; mode = .convert; start = nil
+        inHub = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; shown = true
+    }
     /// Number keys: the nth ring, or 0 for the hub.
     func go(number n: Int) {
         if n == 0 { if hubOn, !inHub { inHub = true; hovered = nil } }
@@ -470,11 +475,13 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private var panel: NSPanel?
     private var shake = ShakeDetector()
     private var dragCount = 0, fired = false, down = false
+    /// Esc went down on the wheel and was swallowed: its key-up is swallowed too.
+    private var swallowingEscape = false
+    private let pb = NSPasteboard(name: .drag)
 
     func start() {
-        let pb = NSPasteboard(name: .drag)
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel]) { [weak self] e in
-            MainActor.assumeIsolated { self?.handle(e, pb) }
+            MainActor.assumeIsolated { self?.handle(e) }
         }
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] e in
             Task { @MainActor in try? await Task.sleep(nanoseconds: 200_000_000); if self?.down == false { self?.hide() } }; return e
@@ -490,29 +497,53 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private func installKeyTap() {
         guard tap == nil, AXIsProcessTrusted() else { return }
         tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
-                                eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+                                eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue | 1 << CGEventType.keyUp.rawValue),
                                 callback: { _, type, event, _ in
             MainActor.assumeIsolated {
                 let me = WheelController.shared
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    if let t = me.tap, me.panel?.isVisible == true { CGEvent.tapEnable(tap: t, enable: true) }
+                    me.syncTap()
                     return Unmanaged.passUnretained(event)
                 }
-                return me.key(event) ? nil : Unmanaged.passUnretained(event)
+                return me.key(event, up: type == .keyUp) ? nil : Unmanaged.passUnretained(event)
             }
         }, userInfo: nil)
         guard let tap else { return }
         CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, tap, 0), .commonModes)
-        // Every keystroke on the Mac waits on an enabled tap, so it's only on while the wheel is up.
-        CGEvent.tapEnable(tap: tap, enable: panel?.isVisible == true)
+        syncTap()
     }
 
-    /// Tab / Shift+Tab cycle the rings, 1–9 jump to one, 0 to the hub. Returns true to swallow the key.
-    /// Only while the wheel is up mid-drag, so these keys work normally everywhere else.
-    private func key(_ e: CGEvent) -> Bool {
-        guard panel?.isVisible == true, NSEvent.pressedMouseButtons & 1 != 0 else { return false }
+    /// Every keystroke on the Mac waits on an enabled tap, so it's only on while the wheel is up, or mid-press when a
+    /// key other than Shift opens the wheel.
+    private func syncTap() {
+        let p = PrefStore.shared.p, keyOpens = down && p.onKey && p.key != .shift
+        if keyOpens { installKeyTap() }   // in case permission was granted since launch
+        if let tap { CGEvent.tapEnable(tap: tap, enable: panel?.isVisible == true || keyOpens || swallowingEscape) }
+    }
+
+    /// Tab / Shift+Tab cycle the rings, 1–9 jump to one, 0 to the hub, Esc closes the wheel but keeps the drag going.
+    /// Without the wheel up, the wheel's key opens it. Returns true to swallow the key. Only mid-drag, so these keys
+    /// work normally everywhere else.
+    private func key(_ e: CGEvent, up: Bool) -> Bool {
+        let code = e.getIntegerValueField(.keyboardEventKeycode)
+        if up {
+            guard code == 53, swallowingEscape else { return false }
+            swallowingEscape = false; syncTap(); return true
+        }
+        guard NSEvent.pressedMouseButtons & 1 != 0 else { return false }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        switch e.getIntegerValueField(.keyboardEventKeycode) {
+        guard panel?.isVisible == true else {
+            let p = PrefStore.shared.p
+            // Only a drag that carries something: otherwise the key is just typed, say while selecting text.
+            guard p.onKey, code == p.key.code, pb.changeCount != dragCount else { return false }
+            if !repeating { open() }
+            return true
+        }
+        switch code {
+        case 53:
+            // Esc: the drag sees none of it, so it carries on and can be dropped anywhere, or the wheel opened again.
+            swallowingEscape = true
+            if !repeating { fired = false; shake.reset(); hide() }
         case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) ? -1 : 1) }   // Tab
         case let k:
             // Key codes for 0...9 on the number row.
@@ -522,26 +553,31 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         return true
     }
 
-    private func handle(_ e: NSEvent, _ pb: NSPasteboard) {
+    private func handle(_ e: NSEvent) {
         switch e.type {
-        case .leftMouseDown: down = true; fired = false; shake.reset(); dragCount = pb.changeCount
-        case .leftMouseUp: down = false
+        case .leftMouseDown: down = true; fired = false; swallowingEscape = false; shake.reset(); dragCount = pb.changeCount; syncTap()
+        case .leftMouseUp: down = false; syncTap()
             // Not if a new drag has started meanwhile: that would close its wheel.
             Task { try? await Task.sleep(nanoseconds: 200_000_000); if !down { hide() } }
         case .scrollWheel:
             // One step per flick: ignore the momentum tail and tiny deltas.
             if panel?.isVisible == true, down, e.momentumPhase == [], abs(e.scrollingDeltaY) > 2 { model.cycle(e.scrollingDeltaY < 0 ? 1 : -1) }
         case .leftMouseDragged:
-            // Only a drag that put files on the drag pasteboard counts, and only once the cheap shake check passes.
-            // Shake (or hold Shift, like Tangerine) opens the wheel.
-            let shaken = shake.add(NSEvent.mouseLocation, e.timestamp) || e.modifierFlags.contains(.shift)
-            guard down, !fired, shaken, pb.changeCount != dragCount else { return }
-            fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
-            guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
-            let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
-            if !flat.isEmpty { show(flat) }
+            // Shake, or hold Shift like Tangerine, as Settings allows. A key other than Shift arrives through the key tap.
+            let p = PrefStore.shared.p
+            let shaken = (p.onShake && shake.add(NSEvent.mouseLocation, e.timestamp)) || (p.onKey && p.key == .shift && e.modifierFlags.contains(.shift))
+            if shaken { open() }
         default: break
         }
+    }
+
+    /// Only a drag that put files on the drag pasteboard counts.
+    private func open() {
+        guard down, !fired, pb.changeCount != dragCount else { return }
+        fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
+        let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
+        if !flat.isEmpty { show(flat) }
     }
 
     private func show(_ urls: [URL]) {
@@ -575,13 +611,13 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         }
         panel?.setFrame(NSRect(origin: o, size: NSSize(width: s, height: s)), display: true)
         panel?.orderFrontRegardless(); panel?.makeKey()
-        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+        syncTap()
         withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) { model.shown = true }
     }
 
     private func hide() {
         panel?.orderOut(nil)
-        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        syncTap()
     }
 
     private func pick(_ p: Preset, _ urls: [URL]) {

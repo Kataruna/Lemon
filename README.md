@@ -137,4 +137,8 @@ mac/packaging/make-app.sh      # builds dist/MacOS/Lemon.app
 
 **Customizing.** *Settings › Wheel* sets the look (themes including the macOS accent color, glass blur and opacity, the center emoji, text color), which formats go on the Convert ring for each kind of file, and which built-in rings show. You can make your own rings from any mix of presets (say, Optimize and Remove background together), open the wheel on a hub of rings, or pick the ring each kind of file opens on. *Settings › Presets* makes custom presets (format plus quality, size, bitrate, CRF, frame rate, metadata); they show up in the window and can go on the wheel.
 
-Not ported: the Space key, the shake/key settings and the right-click menu.
+**Opening the wheel.** *Settings › Wheel › Opening the wheel* turns shaking and the key on or off (not both off) and picks the key: Shift is held, any other key (say Space) is pressed once mid-drag and needs Accessibility permission. Esc closes the wheel and keeps the drag going.
+
+**First launch and updates.** A two-step welcome guide offers the converters (each *Add* runs `brew install` in Terminal) and shows how the wheel works; *Settings › About* brings it back. At startup Lemon checks GitHub for a newer `mac-v…` release and shows a Download notice (turn it off in *Settings › About*).
+
+Not ported: the right-click menu.

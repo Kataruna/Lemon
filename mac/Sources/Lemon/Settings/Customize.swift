@@ -61,6 +61,44 @@ struct Prefs: Codable, Equatable {
     var backPill: Bool? = nil           // back to the hub from a pill under the ring, instead of the center
     var start: [Kind: String]? = nil    // without the hub, the ring files of a kind open on; missing = the first ring
     var glass: GlassStyle? = nil
+    var wheelOnShake: Bool? = nil       // nil = on
+    var wheelOnKey: Bool? = nil         // nil = on
+    var wheelKey: WheelKey? = nil       // nil = Shift
+    var welcomeShown: Bool? = nil
+    var checkUpdates: Bool? = nil       // nil = on
+
+    /// Both off can't be picked in Settings; if saved that way anyway, shaking counts as on.
+    var onShake: Bool { (wheelOnShake ?? true) || !(wheelOnKey ?? true) }
+    var onKey: Bool { wheelOnKey ?? true }
+    var key: WheelKey { wheelKey ?? .shift }
+    /// "shake or hold Shift", "press Space", …: how the wheel opens right now, for hints.
+    var summon: String {
+        let k = key == .shift ? "hold Shift" : "press \(key.name)"
+        return onShake && onKey ? "shake or \(k)" : onShake ? "shake" : k
+    }
+}
+
+/// The key that opens the wheel mid-drag. Shift is held (read off the mouse events, no permission needed); any other
+/// key is pressed, which needs the key tap and so Accessibility permission.
+struct WheelKey: Codable, Hashable {
+    var code: Int64, name: String
+    static let shift = WheelKey(code: 56, name: "Shift")
+    /// Esc closes the wheel, Tab and 0–9 switch rings, and ⌘ ⌥ ⌃ change what the drag does.
+    static let taken: Set<Int64> = [53, 48, 29, 18, 19, 20, 21, 23, 22, 26, 28, 25, 55, 54, 58, 61, 59, 62, 63, 57]
+    private static let names: [Int64: String] = [49: "Space", 36: "Return", 51: "Delete", 117: "Forward Delete", 115: "Home", 119: "End",
+        116: "Page Up", 121: "Page Down", 123: "←", 124: "→", 125: "↓", 126: "↑", 122: "F1", 120: "F2", 99: "F3", 118: "F4",
+        96: "F5", 97: "F6", 98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12"]
+    /// The key in a keyDown or flagsChanged event, or nil if it can't open the wheel.
+    init?(_ e: NSEvent) {
+        let c = Int64(e.keyCode)
+        if e.type == .flagsChanged { guard c == 56 || c == 60 else { return nil }; self = .shift; return }
+        guard !Self.taken.contains(c) else { return nil }
+        // Function keys and the like come through as private-use characters (U+F700 and up), so they get a number.
+        let chars = e.charactersIgnoringModifiers?.uppercased() ?? ""
+        let printable = chars.unicodeScalars.first.map { $0.value > 32 && $0.value < 0xF700 } ?? false
+        self.init(code: c, name: Self.names[c] ?? (printable ? chars : "Key \(c)"))
+    }
+    init(code: Int64, name: String) { self.code = code; self.name = name }
 }
 
 /// A ring the user puts together from any presets: convert, optimize, remove background, their own.
@@ -129,7 +167,82 @@ struct SettingsView: View {
             WheelSettings().tabItem { Label("Wheel", systemImage: "circle.circle") }
             PresetSettings().tabItem { Label("Presets", systemImage: "slider.horizontal.3") }
             BackgroundSettings().tabItem { Label("Background", systemImage: "scissors") }
+            AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
+    }
+}
+
+/// Shake, a key, or both; never neither. Turning off the last one turns the other back on and says so.
+struct WheelTriggers: View {
+    @ObservedObject private var store = PrefStore.shared
+    @State private var note: String?
+    @State private var recording: Any?   // the key monitor while picking a key
+    @State private var refused = false
+
+    var body: some View {
+        let p = store.p
+        Toggle("Open it by shaking the mouse while dragging", isOn: Binding(get: { p.onShake }, set: { on in
+            store.p.wheelOnShake = on
+            if !on, !p.onKey { store.p.wheelOnKey = true; note = "pressing a key" } else { note = nil }
+        }))
+        Toggle("Open it by pressing a key while dragging", isOn: Binding(get: { p.onKey }, set: { on in
+            store.p.wheelOnKey = on
+            if !on, !p.onShake { store.p.wheelOnShake = true; note = "shaking the mouse" } else { note = nil }
+        }))
+        if let note {
+            Text("You can't turn off both ways to open the wheel, so opening it by \(note) is back on.").font(.caption).foregroundStyle(.secondary)
+        }
+        if p.onKey {
+            LabeledContent(p.key == .shift ? "Key (hold)" : "Key") {
+                Button(recording != nil ? (refused ? "Pick another key…" : "Press a key…") : p.key.name) { record() }
+                    .onDisappear(perform: stop)
+            }
+            if p.key != .shift, !AXIsProcessTrusted() {
+                HStack {
+                    Text("Keys other than Shift need Accessibility permission.").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Open Accessibility Settings", action: openAccessibilitySettings).controlSize(.small)
+                }
+            }
+        }
+    }
+
+    /// The next key pressed becomes the wheel's key; Esc cancels. Keys the wheel already uses are turned down.
+    private func record() {
+        guard recording == nil else { return }
+        refused = false
+        recording = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { e in
+            if e.type == .keyDown, e.keyCode == 53 { stop(); return nil }
+            if e.type == .flagsChanged, e.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { return nil }   // a modifier let go
+            guard let k = WheelKey(e) else { refused = true; return nil }
+            store.p.wheelKey = k == .shift ? nil : k
+            stop(); return nil
+        }
+    }
+    private func stop() { if let r = recording { NSEvent.removeMonitor(r) }; recording = nil; refused = false }
+}
+
+func openAccessibilitySettings() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+}
+
+struct AboutSettings: View {
+    @ObservedObject private var store = PrefStore.shared
+    @ObservedObject private var updates = Updates.shared
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Version", value: Updates.current ?? "Development build")
+                Toggle("Check for updates when Lemon starts", isOn: Binding(get: { store.p.checkUpdates ?? true }, set: { store.p.checkUpdates = $0 }))
+                if let u = updates.available { Link("Download Lemon \(u.version)", destination: u.url) }
+            } footer: {
+                Text("Lemon asks GitHub for its newest Mac release. Nothing is installed by itself.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                Button("Show the welcome guide again") { store.p.welcomeShown = false; AppHooks.openWindow?() }
+            }
+        }
+        .settingsPage(height: 260)
     }
 }
 
@@ -183,6 +296,12 @@ struct WheelSettings: View {
                 Slider(value: Binding(get: { g.opacity }, set: { v in var x = g; x.opacity = v; store.p.glass = x }), in: 0.3...1) { Text("Opacity") }
             } header: { Text("Glass") } footer: {
                 Text("Clear is Liquid Glass's clear style; Light frosts it a little; Standard is the regular style; Heavy frosts it further. The edges always bend what's behind. With Liquid Glass off, the same glass is drawn flat, frosted without bending. Lower opacity shows more of what's behind the wheel.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                WheelTriggers()
+            } header: { Text("Opening the wheel") } footer: {
+                Text("Shift is held while dragging; any other key is pressed once. Esc closes the wheel and keeps the drag going.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

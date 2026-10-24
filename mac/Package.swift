@@ -11,5 +11,6 @@ let package = Package(
     targets: [.executableTarget(
         name: "Lemon",
         dependencies: [.product(name: "onnxruntime", package: "onnxruntime-swift-package-manager")],
-        path: "Sources/Lemon")]
+        path: "Sources/Lemon"),
+        .testTarget(name: "LemonTests", dependencies: ["Lemon"], path: "Tests/LemonTests")]
 )

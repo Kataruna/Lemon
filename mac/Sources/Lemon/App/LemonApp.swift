@@ -209,16 +209,30 @@ enum JobState: Equatable {
 
 struct ContentView: View {
     @ObservedObject private var queue = sharedQueue
+    @ObservedObject private var store = PrefStore.shared
+    @ObservedObject private var updates = Updates.shared
     @State private var picking = false
     @State private var targeted = false
 
+    /// The window's background stays put and only what's inside changes.
     var body: some View {
+        let welcomed = store.p.welcomeShown ?? false
+        Group { if welcomed { main } else { WelcomeView().transition(.opacity) } }
+            .seeThroughWindow()
+            .toolbar {
+                if welcomed { toolbarItems }
+                // The guide's Skip.
+                else { ToolbarItem { Button("Skip") { withAnimation(.spring(duration: 0.4)) { store.p.welcomeShown = true } } } }
+            }
+    }
+
+    private var main: some View {
         Group {
             if queue.jobs.isEmpty {
                 VStack(spacing: 14) {
                     FloatingLemon(targeted: targeted)
                     Text("Drop files or folders here").font(.title3.weight(.medium))
-                    Text("Or shake / Shift-drag files anywhere for the wheel").font(.callout).foregroundStyle(.secondary)
+                    Text("Or \(store.p.summon) while dragging files anywhere for the wheel").font(.callout).foregroundStyle(.secondary)
                     Button { picking = true } label: { Label("Choose Files…", systemImage: "plus") }
                         .glassButton().controlSize(.large).padding(.top, 4)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -236,6 +250,15 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 620, minHeight: 360)
+        .safeAreaInset(edge: .top) {
+            if let u = updates.available {
+                HStack(spacing: 12) {
+                    Label("Lemon \(u.version) is available", systemImage: "arrow.down.circle")
+                    Button("Download") { NSWorkspace.shared.open(u.url) }.glassButton(prominent: true)
+                }
+                .padding(.leading, 16).padding(.trailing, 6).frame(height: 40).glassCapsule().padding(.top, 8)
+            }
+        }
         .overlay {
             if targeted {
                 RoundedRectangle(cornerRadius: 18, style: .continuous).fill(.tint.opacity(0.06))
@@ -245,10 +268,11 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.3), value: targeted)
         .animation(.spring(duration: 0.4), value: queue.jobs.isEmpty)
-        .seeThroughWindow()
         .dropDestination(for: URL.self, action: { urls, _ in queue.add(urls); return true }, isTargeted: { targeted = $0 })
         .fileImporter(isPresented: $picking, allowedContentTypes: [.item, .folder], allowsMultipleSelection: true) { if case .success(let u) = $0 { queue.add(u) } }
-        .toolbar {
+    }
+
+    @ToolbarContentBuilder private var toolbarItems: some ToolbarContent {
             ToolbarItem { Button { picking = true } label: { Label("Add", systemImage: "plus") } }
             ToolbarItem {
                 Menu("Set all to") {
@@ -263,7 +287,6 @@ struct ContentView: View {
                 }.disabled(queue.jobs.isEmpty)
             }
             ToolbarItem { Button("Clear") { queue.clear() }.disabled(queue.jobs.isEmpty) }
-        }
     }
 
     /// Floating glass bar over the list: batch progress and the main action. Lives in the content, not the toolbar,
@@ -419,6 +442,7 @@ extension View {
 final class Delegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         WheelController.shared.start()
+        Task { @MainActor in await Updates.shared.check() }
         // In the Dock only while a window is open; closed, Lemon carries on from the menu bar (and the wheel).
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { n in
             let closing = n.object as? NSWindow
@@ -525,6 +549,12 @@ struct SettingsButton: View {
     }
 }
 
+/// How the wheel opens, as Settings has it.
+struct MenuHint: View {
+    @ObservedObject private var store = PrefStore.shared
+    var body: some View { Text("Drag files and \(store.p.summon) to open the wheel").font(.caption) }
+}
+
 /// "Converting 3 of 7 · 42%" and a Cancel item at the top of the menu while a batch runs.
 struct MenuStatus: View {
     @ObservedObject private var progress = sharedQueue.progress
@@ -575,13 +605,13 @@ struct BackgroundSettings: View {
 @main struct LemonApp: App {
     @NSApplicationDelegateAdaptor(Delegate.self) private var delegate
     var body: some Scene {
-        Window("Lemon", id: "main") { ContentView().modifier(Themed()) }
+        Window("Lemon", id: "main") { ContentView().modifier(Themed()) }.defaultSize(width: 760, height: 680)
         Settings { SettingsView() }
         MenuBarExtra { 
             MenuStatus()
             Button("Open Lemon") { AppHooks.openWindow?() }
             SettingsButton()
-            Text("Shake or Shift-drag files to open the wheel").font(.caption)
+            MenuHint()
             Divider()
             Button("Quit Lemon") { NSApp.terminate(nil) }.keyboardShortcut("q")
         } label: { MenuBarIcon() }
