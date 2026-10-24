@@ -45,6 +45,40 @@ The two apps are written separately (C# / WinUI 3 and Swift / SwiftUI) and share
 | Right-click *Convert with Lemon* | Yes | Not yet |
 | Packages | Installer and portable `.exe` | `Lemon.app` in a zip |
 
+## Thanks
+
+Lemon is a friendly front end on top of a lot of excellent free software. Thank you to everyone who builds and maintains these projects.
+
+**The converters** that do the real work:
+
+| Project | What Lemon uses it for |
+|---|---|
+| [ImageMagick](https://imagemagick.org) | Pictures: every image format, Resize, and Optimize for JPEG, PNG, WebP and GIF (on Windows through [Magick.NET](https://github.com/dlemstra/Magick.NET), built in) |
+| [FFmpeg](https://ffmpeg.org) | Audio and video, and Optimize for videos |
+| [Pandoc](https://pandoc.org) | Documents and ebooks: DOCX, ODT, RTF, HTML, Markdown, EPUB |
+| [LibreOffice](https://www.libreoffice.org) | Office files to PDF |
+| [Ghostscript](https://www.ghostscript.com) | Optimize for PDFs |
+
+**Remove background:**
+
+| Project | What Lemon uses it for |
+|---|---|
+| [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | The AI model that cuts out the subject, in the ONNX versions published by [ONNX Community](https://huggingface.co/onnx-community) ([Lite](https://huggingface.co/onnx-community/BiRefNet_lite-ONNX), [full](https://huggingface.co/onnx-community/BiRefNet-ONNX)) |
+| [ONNX Runtime](https://onnxruntime.ai) | Runs the model: with DirectML on Windows, and through the [Swift package](https://github.com/microsoft/onnxruntime-swift-package-manager) on Mac |
+
+**Libraries and tools in the apps:**
+
+| Project | What Lemon uses it for |
+|---|---|
+| [Windows App SDK](https://github.com/microsoft/WindowsAppSDK) (WinUI 3) | The Windows app's interface |
+| [.NET Community Toolkit](https://github.com/CommunityToolkit/dotnet) (MVVM) | View models in the Windows app |
+| [Markdig](https://github.com/xoofx/markdig) | Markdown to HTML on Windows, without Pandoc |
+| [xUnit](https://xunit.net) | The Windows tests |
+| [Inno Setup](https://jrsoftware.org/isinfo.php) | The Windows installer |
+| [winget](https://github.com/microsoft/winget-cli) and [Homebrew](https://brew.sh) | Installing the converters from the welcome guide |
+
+**Inspiration:** [Tangerine](https://apps.apple.com/app/tangerine-file-converter/id6813034065) on macOS, whose drag-and-drop conversion (and hold-Shift gesture) Lemon started from, and [Clop](https://lowtechguys.com/clop/), which Optimize follows (its aggressive mode became *Smaller*).
+
 ## Issues
 
 Report problems on the [issue tracker](https://github.com/Kataruna/Lemon/issues). On Windows, `%LOCALAPPDATA%\Lemon\errors.log` is useful to attach.
