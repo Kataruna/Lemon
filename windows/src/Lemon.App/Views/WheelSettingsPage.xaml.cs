@@ -288,6 +288,7 @@ public sealed partial class WheelSettingsPage : Page
     {
         _loading = true;
         HubSwitch.IsOn = S.OpenOnHub;
+        BackChipSwitch.IsOn = S.BackChip;
         _loading = false;
         OpensOnPanel.Children.Clear();
         OpensOnPanel.Visibility = S.OpenOnHub ? Visibility.Collapsed : Visibility.Visible;
@@ -319,6 +320,14 @@ public sealed partial class WheelSettingsPage : Page
         S.OpenOnHub = HubSwitch.IsOn;
         Changed();
         BuildOpensOn();
+    }
+
+    private void OnBackChipToggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+            return;
+        S.BackChip = BackChipSwitch.IsOn;
+        Changed();
     }
 
     // ---- Convert ring ----

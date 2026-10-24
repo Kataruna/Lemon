@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.AppLifecycle;
@@ -18,16 +19,11 @@ public partial class App : Application
     public static MainWindow? Window { get; private set; }
     public static WheelWindow? Wheel { get; private set; }
 
-    /// <summary>Keys that can open the conversion wheel, by settings name.</summary>
-    public static IReadOnlyDictionary<string, int> WheelKeys { get; } = new Dictionary<string, int>
-    {
-        ["Space"] = 0x20,
-        ["Tab"] = 0x09,
-        ["F1"] = 0x70,
-        ["F2"] = 0x71,
-        ["F3"] = 0x72,
-        ["F4"] = 0x73,
-    };
+    /// <summary>This copy's version, e.g. 0.3.0.</summary>
+    public static Version Version { get; } = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
+
+    /// <summary>A newer release found on GitHub at startup, if any.</summary>
+    public static UpdateCheck.Release? Update { get; private set; }
 
     private static DragGestureMonitor? _gestures;
     private static TrayIcon? _tray;
@@ -86,14 +82,53 @@ public partial class App : Application
         // Starting with Windows or a right-click "To PNG" works from the tray; anything else shows the window.
         if (pending.Any(p => !p.StaysInBackground))
             window.Activate();
+
+        _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>Once per launch and quietly: being offline, or GitHub having trouble, just means no notice.</summary>
+    private static async Task CheckForUpdatesAsync()
+    {
+        if (!Settings.CheckForUpdates)
+            return;
+        try
+        {
+            if (await UpdateCheck.FindAsync(Http, Version) is not { } release)
+                return;
+            // Back on the UI thread here, since OnLaunched started this on it.
+            Update = release;
+            Queue.UpdateMessage = $"Lemon {release.Version} is available (you have {Version.ToString(3)}).";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.Write("Checking for updates", ex);
+        }
+    }
+
+    /// <summary>Opens the newer release's page on GitHub, where the downloads are.</summary>
+    public static void OpenUpdatePage()
+    {
+        if (Update is { } release)
+            _ = Windows.System.Launcher.LaunchUriAsync(new Uri(release.Url));
     }
 
     public static void ApplyWheelSettings()
     {
         if (_gestures is null)
             return;
+        // Older settings turned the key off by clearing it, and could leave no way to open the wheel at all.
+        if (Settings.WheelKey is null)
+        {
+            Settings.WheelKey = "Space";
+            Settings.WheelOnKey = false;
+        }
+        if (!Settings.WheelOnShake && !Settings.WheelOnKey)
+            Settings.WheelOnShake = true;
         _gestures.ShakeEnabled = Settings.WheelOnShake;
-        _gestures.WheelKey = Settings.WheelKey is { } key ? WheelKeys.GetValueOrDefault(key) : 0;
+        _gestures.WheelKey = Settings.WheelOnKey && Enum.TryParse<Windows.System.VirtualKey>(Settings.WheelKey, out var key) ? (int)key : 0;
     }
 
     public static void SetStartWithWindows(bool enabled)
@@ -108,7 +143,7 @@ public partial class App : Application
     {
         var tray = new TrayIcon(
             Path.Combine(AppContext.BaseDirectory, "Assets", "Lemon.ico"),
-            "Lemon: shake the mouse or press Space while dragging files",
+            "Lemon: shake the mouse or press the wheel key while dragging files",
             () =>
             [
                 new("Open Lemon", ShowQueue, IsDefault: true),

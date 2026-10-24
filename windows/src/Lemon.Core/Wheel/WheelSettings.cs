@@ -35,6 +35,9 @@ public sealed class WheelSettings
     /// <summary>Every drag opens on the hub, where the rings themselves are the slices.</summary>
     public bool OpenOnHub { get; set; }
 
+    /// <summary>Inside a ring, go back to the hub from a chip under the ring rather than from the middle.</summary>
+    public bool BackChip { get; set; }
+
     /// <summary>Without the hub, the ring each kind of file opens on, by <see cref="WheelRing.Id"/>; missing means the first.</summary>
     public Dictionary<MediaKind, string> OpensOn { get; set; } = [];
 

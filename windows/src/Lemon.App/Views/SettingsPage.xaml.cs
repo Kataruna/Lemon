@@ -1,7 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Lemon.Core.Models;
 using System.Diagnostics;
-using System.Reflection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -14,6 +13,57 @@ public sealed record ToolStatus(ExternalTool Tool, string Title, string Purpose,
     public string Glyph => Found ? "" : "";
     public Brush Brush => (Brush)Application.Current.Resources[Found ? "SystemFillColorSuccessBrush" : "SystemFillColorCautionBrush"];
     public FontFamily DetailFont => new(Found ? "Segoe UI Variable" : "Consolas");
+    /// <summary>The welcome guide's button: install with winget, or open the download page for one that isn't on it.</summary>
+    public string ActionText => ToolLocator.WingetId(Tool) is null ? "Get it…" : "Add";
+    public Visibility ActionVisibility => Found ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility ReadyVisibility => Found ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>The welcome guide names the kind of file, not the program.</summary>
+    public string Kind => Tool switch
+    {
+        ExternalTool.Ffmpeg => "Videos and music",
+        ExternalTool.Pandoc => "Documents and ebooks",
+        ExternalTool.LibreOffice => "Making PDFs",
+        _ => "Shrinking PDFs",
+    };
+
+    public string KindDetail => Tool switch
+    {
+        ExternalTool.Ffmpeg => "MP4, MP3, GIFs from videos and more",
+        ExternalTool.Pandoc => "Word, EPUB, web pages and more",
+        ExternalTool.LibreOffice => "Turn Word, Excel and PowerPoint files into PDFs",
+        _ => "Make PDFs smaller to share",
+    };
+
+    public string KindGlyph => Tool switch
+    {
+        ExternalTool.Ffmpeg => "",
+        ExternalTool.Pandoc => "",
+        ExternalTool.LibreOffice => "",
+        _ => "",
+    };
+
+    /// <summary>Looks for every converter again (picking up ones installed since) and says what each is for.</summary>
+    public static ToolStatus[] CheckAll()
+    {
+        App.Conversion.RefreshTools();
+        var locator = new ToolLocator(tool => App.Settings.ToolPaths.GetValueOrDefault(tool));
+        return
+        [
+            Status(locator, ExternalTool.Ffmpeg, "Audio and video, video to GIF, and optimizing video"),
+            Status(locator, ExternalTool.Pandoc, "Word, OpenDocument, RTF, EPUB, HTML and Markdown"),
+            Status(locator, ExternalTool.LibreOffice, "PDF output, plus Excel and PowerPoint to PDF"),
+            Status(locator, ExternalTool.Ghostscript, "Optimizing PDFs"),
+        ];
+    }
+
+    private static ToolStatus Status(ToolLocator locator, ExternalTool tool, string purpose)
+    {
+        var path = locator.Find(tool);
+        return path is not null
+            ? new ToolStatus(tool, ToolLocator.DisplayName(tool), purpose, path, true)
+            : new ToolStatus(tool, $"{ToolLocator.DisplayName(tool)} — not found", purpose, ToolLocator.InstallHint(tool), false);
+    }
 }
 
 /// <summary>One downloadable background-remover model in Settings.</summary>
@@ -90,10 +140,13 @@ public sealed partial class SettingsPage : Page
         ContextMenuSwitch.IsOn = ContextMenu.IsRegistered();
         TraySwitch.IsOn = App.Settings.KeepRunningInTray;
         StartupSwitch.IsOn = StartWithWindows.IsEnabled();
-        ShakeSwitch.IsOn = App.Settings.WheelOnShake;
-        WheelKeyBox.ItemsSource = new[] { "Off" }.Concat(App.WheelKeys.Keys).ToList();
-        WheelKeyBox.SelectedItem = App.Settings.WheelKey is { } key && App.WheelKeys.ContainsKey(key) ? key : "Off";
-        VersionText.Text = $"Lemon {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)}";
+        VersionText.Text = $"Lemon {App.Version.ToString(3)}";
+        UpdateCheckBox.IsChecked = App.Settings.CheckForUpdates;
+        if (App.Update is { } update)
+        {
+            UpdateLink.Content = $"Lemon {update.Version} is available: download it";
+            UpdateLink.Visibility = Visibility.Visible;
+        }
         RefreshTools();
         ModelList.ItemsSource = BackgroundModelInfo.All.Select(m => new ModelRow(m)).ToList();
         foreach (ModelRow row in (IEnumerable<ModelRow>)ModelList.ItemsSource)
@@ -173,24 +226,6 @@ public sealed partial class SettingsPage : Page
             App.SetStartWithWindows(StartupSwitch.IsOn);
     }
 
-    private void OnShakeToggled(object sender, RoutedEventArgs e)
-    {
-        if (_loading)
-            return;
-        App.Settings.WheelOnShake = ShakeSwitch.IsOn;
-        App.Settings.Save();
-        App.ApplyWheelSettings();
-    }
-
-    private void OnWheelKeyChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_loading || WheelKeyBox.SelectedItem is not string key)
-            return;
-        App.Settings.WheelKey = key == "Off" ? null : key;
-        App.Settings.Save();
-        App.ApplyWheelSettings();
-    }
-
     private void OnContextMenuToggled(object sender, RoutedEventArgs e)
     {
         if (_loading)
@@ -221,27 +256,21 @@ public sealed partial class SettingsPage : Page
 
     private void RefreshTools()
     {
-        App.Conversion.RefreshTools();
-        var locator = new ToolLocator(tool => App.Settings.ToolPaths.GetValueOrDefault(tool));
-        ToolList.ItemsSource = new[]
-        {
-            Status(locator, ExternalTool.Ffmpeg, "Audio and video, video to GIF, and optimizing video"),
-            Status(locator, ExternalTool.Pandoc, "Word, OpenDocument, RTF, EPUB, HTML and Markdown"),
-            Status(locator, ExternalTool.LibreOffice, "PDF output, plus Excel and PowerPoint to PDF"),
-            Status(locator, ExternalTool.Ghostscript, "Optimizing PDFs"),
-        };
+        ToolList.ItemsSource = ToolStatus.CheckAll();
 
         // Re-register so the right-click menu offers targets that just became possible.
         if (!_loading && ContextMenuSwitch.IsOn)
             ContextMenu.Register(Environment.ProcessPath!, (from, to) => App.Conversion.FindConverter(from, to) is not null);
     }
 
-    private static ToolStatus Status(ToolLocator locator, ExternalTool tool, string purpose)
+    private void OnDownloadUpdate(object sender, RoutedEventArgs e) => App.OpenUpdatePage();
+
+    private void OnShowWelcome(object sender, RoutedEventArgs e) => App.Window?.ShowWelcome();
+
+    private void OnUpdateCheckClick(object sender, RoutedEventArgs e)
     {
-        var path = locator.Find(tool);
-        return path is not null
-            ? new ToolStatus(tool, ToolLocator.DisplayName(tool), purpose, path, true)
-            : new ToolStatus(tool, $"{ToolLocator.DisplayName(tool)} — not found", purpose, ToolLocator.InstallHint(tool), false);
+        App.Settings.CheckForUpdates = UpdateCheckBox.IsChecked == true;
+        App.Settings.Save();
     }
 
     private void OnOpenSettingsFolder(object sender, RoutedEventArgs e)

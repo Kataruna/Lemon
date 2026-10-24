@@ -13,15 +13,25 @@ public enum ExternalTool
 /// <param name="searchSystem">False limits lookups to <paramref name="overrides"/>; used by tests.</param>
 public sealed class ToolLocator(Func<ExternalTool, string?>? overrides = null, bool searchSystem = true)
 {
-    public static string InstallHint(ExternalTool tool) => tool switch
+    /// <summary>The tool's winget package, or null when it isn't on winget (see <see cref="DownloadPage"/>).</summary>
+    public static string? WingetId(ExternalTool tool) => tool switch
     {
-        ExternalTool.Ffmpeg or ExternalTool.Ffprobe => "winget install Gyan.FFmpeg",
-        ExternalTool.Pandoc => "winget install JohnMacFarlane.Pandoc",
-        ExternalTool.LibreOffice => "winget install TheDocumentFoundation.LibreOffice",
-        // Not on winget; Artifex only publishes installers on its own site.
-        ExternalTool.Ghostscript => "https://ghostscript.com/releases/gsdnld.html",
-        _ => "",
+        ExternalTool.Ffmpeg or ExternalTool.Ffprobe => "Gyan.FFmpeg",
+        ExternalTool.Pandoc => "JohnMacFarlane.Pandoc",
+        ExternalTool.LibreOffice => "TheDocumentFoundation.LibreOffice",
+        _ => null,
     };
+
+    /// <summary>Where to download a tool that isn't on winget.</summary>
+    public static string? DownloadPage(ExternalTool tool) => tool switch
+    {
+        // Artifex only publishes installers on its own site.
+        ExternalTool.Ghostscript => "https://ghostscript.com/releases/gsdnld.html",
+        _ => null,
+    };
+
+    public static string InstallHint(ExternalTool tool) =>
+        WingetId(tool) is { } id ? "winget install " + id : DownloadPage(tool) ?? "";
 
     public static string DisplayName(ExternalTool tool) => tool switch
     {

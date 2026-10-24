@@ -24,7 +24,10 @@ public sealed partial class MainWindow : Window
             presenter.PreferredMinimumHeight = (int)(480 * scale);
         }
 
-        Nav.SelectedItem = Nav.MenuItems[0];
+        if (App.Settings.WelcomeShown)
+            Nav.SelectedItem = Nav.MenuItems[0];
+        else
+            ShowWelcome();
         AppWindow.Closing += OnClosing;
     }
 
@@ -85,6 +88,15 @@ public sealed partial class MainWindow : Window
 
     public void ShowSettingsPage() => Nav.SelectedItem = Nav.SettingsItem;
 
+    public void ShowWheelPage() => Nav.SelectedItem = Nav.MenuItems[2];
+
+    /// <summary>The first-run guide. It isn't one of the tabs, so none is selected while it's up.</summary>
+    public void ShowWelcome()
+    {
+        Nav.SelectedItem = null;
+        ContentFrame.Navigate(typeof(WelcomePage), null, new SuppressNavigationTransitionInfo());
+    }
+
     /// <summary>Shows the window (from the tray, minimized, or never shown yet) and focuses it.</summary>
     public void BringToFront()
     {
@@ -97,6 +109,9 @@ public sealed partial class MainWindow : Window
 
     private void OnNavigationChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        // Cleared for the welcome guide, which navigates by itself.
+        if (args.SelectedItem is null && !args.IsSettingsSelected)
+            return;
         var page = args.IsSettingsSelected
             ? typeof(SettingsPage)
             : (args.SelectedItem as NavigationViewItem)?.Tag switch

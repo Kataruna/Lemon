@@ -80,6 +80,14 @@ public sealed partial class WheelWindow : Window
     private int _ring;
     /// <summary>On the hub, the slices are the rings and resting on one opens it.</summary>
     private bool _inHub;
+    /// <summary>
+    /// The wheel opens centered on the pointer, so the middle only leads back to the hub once the pointer has left it
+    /// since this ring came up; otherwise a pause right after the shake would send the files to the hub on its own.
+    /// </summary>
+    private bool _centerArmed;
+    /// <summary>What the middle says when it isn't the way back to the hub.</summary>
+    private string _centerText = "";
+    private const string BackGlyph = "";
     /// <summary>Where the drag was last seen, to re-check what's under it when the ring turns without a mouse move.</summary>
     private Point? _pointer;
     private int _hover = None;
@@ -128,6 +136,8 @@ public sealed partial class WheelWindow : Window
                 GoTo(target, target == HubTarget || target > _ring ? 1 : -1);
             else if (_inHub && _hover >= 0)
                 GoTo(_hover, 1);
+            else if (_hover == CenterHit && CenterBack && _centerArmed)
+                GoTo(HubTarget, -1);
         };
 
         _compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
@@ -139,6 +149,9 @@ public sealed partial class WheelWindow : Window
     public nint Handle => WinRT.Interop.WindowNative.GetWindowHandle(this);
 
     public bool IsOpen { get; private set; }
+
+    /// <summary>Inside a ring with the hub on, the middle is the way back to it (unless Settings asks for a chip instead).</summary>
+    private bool CenterBack => _plan.HubOn && !_inHub && !App.Settings.Wheel.BackChip;
 
     /// <summary>Pops the wheel up centered on a physical screen point, kept inside that monitor's work area.</summary>
     public void ShowAt(int x, int y)
@@ -157,10 +170,11 @@ public sealed partial class WheelWindow : Window
         _plan = WheelPlan.Empty;
         _ring = 0;
         _inHub = false;
+        _centerArmed = false;
+        _centerText = "Drop on a format";
         ApplyLook();
         ShowSlices();
         UpdatePageButton();
-        SetHub("Drop on a format", icon: null);
 
         var monitor = Native.MonitorFromPoint(new Native.POINT { X = x, Y = y }, 2 /* MONITOR_DEFAULTTONEAREST */);
         var info = new Native.MONITORINFO { Size = System.Runtime.InteropServices.Marshal.SizeOf<Native.MONITORINFO>() };
@@ -229,6 +243,7 @@ public sealed partial class WheelWindow : Window
         _inHub = target == HubTarget;
         if (!_inHub)
             _ring = target;
+        _centerArmed = false;
         ShowSlices(animate: true);
         RotateFrom(Ring, step >= 0 ? -30f : 30f, damping: 0.6f);
         UpdatePageButton();
@@ -313,20 +328,19 @@ public sealed partial class WheelWindow : Window
             _plan = Plan(_paths);
             _ring = _plan.Start;
             _inHub = _plan.OpensOnHub;
+            _centerText = _paths.Count == 0 ? "Lemon can't convert these"
+                : _plan.Rings.Count == 0 ? "Mixed file types: add to queue"
+                : "Add to queue";
             ShowSlices(animate: true);
             UpdatePageButton();
-            SetHub(
-                _paths.Count == 0 ? "Lemon can't convert these"
-                : _plan.Rings.Count == 0 ? "Mixed file types: add to queue"
-                : "Add to queue",
-                icon: null);
             UpdateHover(_pointer is { } point ? HitTest(point) : _hover, force: true);
         }
         catch (Exception ex)
         {
             // Never leave a broken task behind for the drop to trip over; the hub still works as "add to queue".
             ErrorLog.Write("Building the conversion wheel", ex);
-            SetHub("Add to queue", icon: null);
+            _centerText = "Add to queue";
+            ShowCenter();
         }
     }
 
@@ -340,8 +354,8 @@ public sealed partial class WheelWindow : Window
         var hit = HitTest(_pointer.Value);
         UpdateHover(hit);
         var usable = _paths is null || _paths.Count > 0;
-        // A ring on the hub isn't somewhere to drop, only to rest on.
-        var drops = hit != None && !(_inHub && hit >= 0);
+        // A ring on the hub, or the middle when it leads back there, isn't somewhere to drop, only to rest on.
+        var drops = hit != None && !(_inHub && hit >= 0) && !(hit == CenterHit && CenterBack);
         e.AcceptedOperation = drops && usable ? DataPackageOperation.Copy : DataPackageOperation.None;
         e.DragUIOverride.IsGlyphVisible = false;
         e.DragUIOverride.Caption = hit switch
@@ -350,6 +364,7 @@ public sealed partial class WheelWindow : Window
             >= 0 when hit < _choices.Count => (_plan.Rings[_ring].Page == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
             <= ChipHit when _chips.ElementAtOrDefault(ChipHit - hit) is var target && (target == HubTarget || target != _ring) =>
                 "Hold here for " + (target == HubTarget ? "all rings" : _plan.Rings[target].Name),
+            CenterHit when CenterBack => "Hold here for all rings",
             CenterHit when usable => "Add to Lemon",
             _ => "",
         };
@@ -360,7 +375,7 @@ public sealed partial class WheelWindow : Window
     private async void OnDrop(object sender, DragEventArgs e)
     {
         var hit = HitTest(e.GetPosition(Ring));
-        if (hit == None || (hit >= 0 && (_inHub || hit >= _choices.Count)))
+        if (hit == None || (hit >= 0 && (_inHub || hit >= _choices.Count)) || (hit == CenterHit && CenterBack))
             return;
         // A drop on a mode chip just adds the files to the queue, like one on the hub.
         if (hit <= ChipHit)
@@ -426,6 +441,8 @@ public sealed partial class WheelWindow : Window
 
     private void UpdateHover(int hit, bool force = false)
     {
+        if (hit != CenterHit)
+            _centerArmed = true;
         if (hit == _hover && !force)
             return;
         var changed = hit != _hover;
@@ -450,9 +467,10 @@ public sealed partial class WheelWindow : Window
         Spring(_hub, "Scale", new Vector3(onHub ? 1.1f : 1f), damping: 0.4f);
         Spring(_hubContent, "Scale", new Vector3(onHub ? 1.12f : 1f), damping: 0.4f);
 
-        // Resting on a chip (or a ring on the hub) turns to it, like a spring-loaded folder; leaving it before then doesn't.
+        // Resting on a chip (or a ring on the hub, or the middle on the way back) turns to it, like a spring-loaded
+        // folder; leaving it before then doesn't.
         StyleChips();
-        var onChip = (hit <= ChipHit || (_inHub && hit >= 0)) && !_dropped;
+        var onChip = (hit <= ChipHit || (_inHub && hit >= 0) || (hit == CenterHit && CenterBack && _centerArmed)) && !_dropped;
         if (onChip && changed)
         {
             _pageTimer.Stop();
@@ -732,12 +750,13 @@ public sealed partial class WheelWindow : Window
     private double BarWidth => _chips.Length * ChipWidth + 2 * BarPadding;
 
     /// <summary>
-    /// Shows a chip for each ring, or with the hub on a single one back to it (none on the hub itself), or no bar
-    /// when there's only one ring.
+    /// Shows a chip for each ring, or with the hub on a single one back to it if the middle isn't the way back (none
+    /// on the hub itself), or no bar when there's only one ring.
     /// </summary>
     private void UpdatePageButton()
     {
-        int[] chips = _plan.Rings.Count < 2 || _inHub ? [] : _plan.HubOn ? [HubTarget] : [.. Enumerable.Range(0, _plan.Rings.Count)];
+        ShowCenter();
+        int[] chips = _plan.Rings.Count < 2 || _inHub || CenterBack ? [] : _plan.HubOn ? [HubTarget] : [.. Enumerable.Range(0, _plan.Rings.Count)];
         if (!chips.SequenceEqual(_chips))
         {
             _chips = chips;
@@ -891,9 +910,19 @@ public sealed partial class WheelWindow : Window
     {
         _hubText.Text = text;
         _hubIcon.Glyph = icon ?? "";
+        _hubIcon.Foreground = icon == BackGlyph ? _look.Text : Brush("SystemFillColorSuccessBrush");
         _hubIcon.Visibility = icon is null ? Visibility.Collapsed : Visibility.Visible;
         _hubImage.Visibility = icon is null && _look.UsesLemonPicture ? Visibility.Visible : Visibility.Collapsed;
         _hubEmoji.Visibility = icon is null && !_look.UsesLemonPicture ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>The middle: the way back to the hub when it leads there, otherwise what a drop on it does.</summary>
+    private void ShowCenter()
+    {
+        if (CenterBack)
+            SetHub("All rings", BackGlyph);
+        else
+            SetHub(_centerText, icon: null);
     }
 
     /// <summary>Lays out the slices: the current ring's presets, or on the hub the rings themselves.</summary>

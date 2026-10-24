@@ -64,13 +64,15 @@ Lemon isn't code-signed yet, so the first time you run a download, Windows may s
 If you'd rather check the download first, its SHA-256 is shown next to each file on the release page. Compare it with:
 
 ```powershell
-Get-FileHash .\Lemon-0.2.0-Setup.exe -Algorithm SHA256
+Get-FileHash .\Lemon-0.3.0-Setup.exe -Algorithm SHA256
 ```
 
 ### First steps
 
+The first time Lemon opens, a short welcome guide walks you through two things. First, what you want to convert besides pictures: each kind of file has an **Add** button that installs the tool it needs with `winget` (see the table below). Then, how to open the wheel: drag, shake, drop. You can skip it, and bring it back any time from **Settings › About › Show the welcome guide again**.
+
 - **Convert a batch:** open Lemon, drop files or folders onto the window (or click *Add files*), pick a preset for each file or use *Set all to*, then click **Convert**. Files are saved next to the originals; *Settings › Output* can send them to a folder instead.
-- **Use the conversion wheel:** while Lemon is running (minimized or in the notification area is fine), start dragging files anywhere, for example from File Explorer or the desktop. Then **shake the mouse** or press **Space**, and the wheel pops up under the pointer. Drop on a format to convert straight away, or on the lemon in the middle to add the files to the queue. Switch rings with the chips under the wheel, **Tab**, the number keys or the scroll wheel.
+- **Use the conversion wheel:** while Lemon is running (minimized or in the notification area is fine), start dragging files anywhere, for example from File Explorer or the desktop. Then **shake the mouse** or press **Space** (you can change the key, or turn either one off, in Settings), and the wheel pops up under the pointer. Drop on a format to convert straight away, or on the lemon in the middle to add the files to the queue. Switch rings with the chips under the wheel, **Tab**, the number keys or the scroll wheel.
 - **Make the wheel yours:** the **Wheel** tab sets its look, its rings and what each kind of file opens on, with a live preview.
 - **Closing the window** keeps Lemon in the notification area (the lemon by the clock), so the wheel keeps working. Right-click that lemon to quit. You can turn this off in Settings.
 

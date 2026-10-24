@@ -16,11 +16,20 @@ public sealed class AppSettings
     /// <summary>Open the conversion wheel by shaking the mouse while dragging files.</summary>
     public bool WheelOnShake { get; set; } = true;
 
-    /// <summary>Key that opens the conversion wheel while dragging files (e.g. "Space"), or null for none.</summary>
+    /// <summary>Open the conversion wheel by pressing <see cref="WheelKey"/> while dragging files.</summary>
+    public bool WheelOnKey { get; set; } = true;
+
+    /// <summary>The key that opens the conversion wheel, by its Windows.System.VirtualKey name (e.g. "Space").</summary>
     public string? WheelKey { get; set; } = "Space";
+
+    /// <summary>Look on GitHub for a newer version each time Lemon starts.</summary>
+    public bool CheckForUpdates { get; set; } = true;
 
     /// <summary>Closing the window hides Lemon to the notification area instead of quitting.</summary>
     public bool KeepRunningInTray { get; set; } = true;
+
+    /// <summary>Whether the welcome guide (converters to install, how to open the wheel) has been finished or skipped.</summary>
+    public bool WelcomeShown { get; set; }
 
     /// <summary>Whether the "Lemon is still running" notice has been shown after the first close.</summary>
     public bool TrayNoticeShown { get; set; }

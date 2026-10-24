@@ -31,7 +31,9 @@ internal static class WheelPreview
             ? plan.Rings.Select(r => (r.Name, (string?)r.Detail, (string?)r.Glyph)).ToList()
             : plan.Rings.Count == 0 ? []
             : plan.Choices[plan.Start].Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, (string?)null) : default).ToList();
-        int[] chips = plan.Rings.Count < 2 || inHub ? [] : plan.HubOn ? [-1] : [.. Enumerable.Range(0, plan.Rings.Count)];
+        // Inside a ring with the hub on, the middle leads back to it unless a chip under the ring does.
+        var centerBack = plan.HubOn && !inHub && !settings.BackChip;
+        int[] chips = plan.Rings.Count < 2 || inHub || centerBack ? [] : plan.HubOn ? [-1] : [.. Enumerable.Range(0, plan.Rings.Count)];
         var barWidth = chips.Length * ChipWidth + 2 * BarPadding;
         var barHeight = ChipHeight + 2 * BarPadding;
 
@@ -110,10 +112,12 @@ internal static class WheelPreview
         Canvas.SetTop(hub, Center - InnerRadius);
         canvas.Children.Add(hub);
         var middleContent = new StackPanel { Width = InnerRadius * 2, Spacing = 4 };
-        middleContent.Children.Add(look.UsesLemonPicture
+        middleContent.Children.Add(centerBack
+            ? new FontIcon { Glyph = "", FontSize = 26, Width = 32, Height = 32, Foreground = look.Text }
+            : look.UsesLemonPicture
             ? new Image { Width = 32, Height = 32, Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Lemon.png")) }
             : new TextBlock { Text = look.Center, FontSize = 28, FontFamily = new FontFamily("Segoe UI Emoji"), HorizontalAlignment = HorizontalAlignment.Center });
-        middleContent.Children.Add(new TextBlock { Text = plan.Rings.Count == 0 ? "Nothing for these files" : "Add to queue", FontSize = 12, TextAlignment = TextAlignment.Center, Foreground = Brush("TextFillColorSecondaryBrush") });
+        middleContent.Children.Add(new TextBlock { Text = plan.Rings.Count == 0 ? "Nothing for these files" : centerBack ? "All rings" : "Add to queue", FontSize = 12, TextAlignment = TextAlignment.Center, Foreground = Brush("TextFillColorSecondaryBrush") });
         Canvas.SetLeft(middleContent, Center - InnerRadius);
         middleContent.SizeChanged += (_, _) => Canvas.SetTop(middleContent, Center - middleContent.ActualHeight / 2);
         canvas.Children.Add(middleContent);

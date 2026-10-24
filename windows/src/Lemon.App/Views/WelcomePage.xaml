@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="Lemon.App.Views.WelcomePage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Lemon.App.Views"
+    Background="Transparent">
+
+    <Page.Resources>
+        <!-- One 6-second loop. Times: pick up 0.3, travel to 1.5, shake 1.6–2.3, wheel opens 2.5, onto JPG 3.3, let go 3.6, new file 4.2. -->
+        <Storyboard x:Name="WheelDemo" RepeatBehavior="Forever" Duration="0:0:6">
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Dragged" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:0.3" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:3.6" Value="1" />
+                <LinearDoubleKeyFrame KeyTime="0:0:3.8" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="DragMove" Storyboard.TargetProperty="TranslateX">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.4" Value="0" />
+                <SplineDoubleKeyFrame KeyTime="0:0:1.5" Value="280" KeySpline="0.4,0 0.2,1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="DragMove" Storyboard.TargetProperty="TranslateY">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:0.4" Value="0" />
+                <SplineDoubleKeyFrame KeyTime="0:0:1.5" Value="10" KeySpline="0.4,0 0.2,1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.7" Value="10" />
+                <SplineDoubleKeyFrame KeyTime="0:0:3.3" Value="-55" KeySpline="0.4,0 0.2,1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames x:Name="ShakeAnimation" Storyboard.TargetName="DragShake" Storyboard.TargetProperty="TranslateX">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.6" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:1.7" Value="14" />
+                <LinearDoubleKeyFrame KeyTime="0:0:1.8" Value="-14" />
+                <LinearDoubleKeyFrame KeyTime="0:0:1.9" Value="14" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.0" Value="-14" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.1" Value="10" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.2" Value="-6" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.3" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames x:Name="KeyAnimation" Storyboard.TargetName="KeyCap" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.6" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:1.8" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.4" Value="1" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.6" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Wheel" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.3" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:2.5" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:3.6" Value="1" />
+                <LinearDoubleKeyFrame KeyTime="0:0:3.9" Value="0" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="WheelScale" Storyboard.TargetProperty="ScaleX">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0.6" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.3" Value="0.6" />
+                <SplineDoubleKeyFrame KeyTime="0:0:2.55" Value="1" KeySpline="0.2,0.8 0.3,1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="WheelScale" Storyboard.TargetProperty="ScaleY">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0.6" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.3" Value="0.6" />
+                <SplineDoubleKeyFrame KeyTime="0:0:2.55" Value="1" KeySpline="0.2,0.8 0.3,1" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="LitSlice" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:3.1" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:3.25" Value="0.35" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ResultFile" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:3.9" Value="0" />
+                <LinearDoubleKeyFrame KeyTime="0:0:4.2" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+            <!-- The step names under the picture light up in turn -->
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="DragLabel" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.6" Value="0.35" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="SummonLabel" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0.35" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:1.6" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.7" Value="0.35" />
+            </DoubleAnimationUsingKeyFrames>
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="DropLabel" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="0.35" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.7" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+        </Storyboard>
+    </Page.Resources>
+
+    <ScrollViewer>
+        <StackPanel Padding="32,24,32,32" Spacing="20" MaxWidth="640" HorizontalAlignment="Center">
+            <Grid>
+                <HyperlinkButton Content="Skip" HorizontalAlignment="Right" VerticalAlignment="Top" Click="OnFinish" />
+                <StackPanel Spacing="8" HorizontalAlignment="Center" Margin="0,16,0,0">
+                    <Image Source="ms-appx:///Assets/Lemon.png" Width="72" Height="72" />
+                    <TextBlock x:Name="HeadingText" Style="{StaticResource TitleTextBlockStyle}" HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock x:Name="SubheadingText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Step 1: what kinds of files to set up -->
+            <StackPanel x:Name="ToolsStep" Spacing="8">
+                <Border Style="{StaticResource CardStyle}">
+                    <Grid ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <FontIcon Glyph="&#xEB9F;" FontSize="24" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Pictures" />
+                            <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="Built in" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                            <TextBlock Text="Ready" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <ItemsControl x:Name="ToolList">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="8" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="views:ToolStatus">
+                            <Border Style="{StaticResource CardStyle}">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="{x:Bind KindGlyph}" FontSize="24" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Kind}" />
+                                        <TextBlock Style="{StaticResource CaptionTextBlockStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{x:Bind KindDetail}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Visibility="{x:Bind ReadyVisibility}">
+                                        <FontIcon Glyph="&#xE73E;" FontSize="14" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                        <TextBlock Text="Ready" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2" VerticalAlignment="Center" MinWidth="96" Content="{x:Bind ActionText}" Visibility="{x:Bind ActionVisibility}" Tag="{x:Bind Tool}" Click="OnToolAction" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <InfoBar x:Name="ToolInfo" Severity="Warning" IsClosable="True" />
+                <TextBlock
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    HorizontalAlignment="Center"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap"
+                    Text="Add only what you need. Each one is a free program that Lemon installs for you, and you can add the rest any time in Settings." />
+            </StackPanel>
+
+            <!-- Step 2: the wheel, acted out on a loop: drag a file, shake (or press the key), drop it on a format -->
+            <StackPanel x:Name="WheelStep" Spacing="12" Visibility="Collapsed">
+                <Border Style="{StaticResource CardStyle}" Padding="0">
+                    <Viewbox Stretch="Uniform" MaxHeight="260">
+                        <Canvas Width="540" Height="240">
+                            <!-- The file in its folder, and the converted copy that appears next to it -->
+                            <Border x:Name="OriginalFile" Canvas.Left="40" Canvas.Top="100" Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE91B;" FontSize="16" />
+                                    <TextBlock Text="Photo.heic" />
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="ResultFile" Canvas.Left="40" Canvas.Top="150" Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0" Opacity="0">
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE73E;" FontSize="16" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                                    <TextBlock Text="Photo.jpg" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- The wheel, centered on (380,130) where the cursor stops -->
+                            <Grid x:Name="Wheel" Canvas.Left="290" Canvas.Top="40" Width="180" Height="180" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                                <Grid.RenderTransform>
+                                    <ScaleTransform x:Name="WheelScale" ScaleX="0.6" ScaleY="0.6" />
+                                </Grid.RenderTransform>
+                                <Ellipse Fill="{ThemeResource CardBackgroundFillColorDefaultBrush}" Stroke="{ThemeResource AccentFillColorDefaultBrush}" StrokeThickness="3" />
+                                <Path x:Name="LitSlice" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0"
+                                      Data="M27.8,27.8 A88,88 0 0 1 152.2,27.8 L114.7,65.3 A35,35 0 0 0 65.3,65.3 Z" />
+                                <Line X1="27" Y1="27" X2="153" Y2="153" Stroke="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <Line X1="153" Y1="27" X2="27" Y2="153" Stroke="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <TextBlock Text="JPG" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,22,0,0" />
+                                <TextBlock Text="PNG" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0" />
+                                <TextBlock Text="WEBP" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,22" />
+                                <TextBlock Text="PDF" FontWeight="SemiBold" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <Ellipse Width="70" Height="70" Fill="{ThemeResource CardBackgroundFillColorDefaultBrush}" Stroke="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <Image Source="ms-appx:///Assets/Lemon.png" Width="32" Height="32" />
+                            </Grid>
+
+                            <Border x:Name="KeyCap" Canvas.Left="400" Canvas.Top="150" Padding="10,4" CornerRadius="6" Opacity="0"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}" BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}" BorderThickness="1,1,1,3">
+                                <TextBlock x:Name="KeyCapText" FontWeight="SemiBold" />
+                            </Border>
+
+                            <!-- What's being dragged: a copy of the file under the cursor. The outer transform travels, the inner one shakes. -->
+                            <Grid x:Name="Dragged" Canvas.Left="40" Canvas.Top="100" Opacity="0">
+                                <Grid.RenderTransform>
+                                    <CompositeTransform x:Name="DragMove" />
+                                </Grid.RenderTransform>
+                                <Grid>
+                                    <Grid.RenderTransform>
+                                        <CompositeTransform x:Name="DragShake" />
+                                    </Grid.RenderTransform>
+                                    <Border Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0" Opacity="0.75">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <FontIcon Glyph="&#xE91B;" FontSize="16" />
+                                            <TextBlock Text="Photo.heic" />
+                                        </StackPanel>
+                                    </Border>
+                                    <Path Margin="60,20,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Fill="White" Stroke="Black" StrokeThickness="1"
+                                          Data="M0,0 L0,18 L5,13.5 L8.5,21 L11.5,19.8 L8,12.5 L14,12.5 Z" />
+                                </Grid>
+                            </Grid>
+                        </Canvas>
+                    </Viewbox>
+                </Border>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="32">
+                    <TextBlock x:Name="DragLabel" Style="{StaticResource SubtitleTextBlockStyle}" Text="1. Drag" />
+                    <TextBlock x:Name="SummonLabel" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <TextBlock x:Name="DropLabel" Style="{StaticResource SubtitleTextBlockStyle}" Text="3. Drop" />
+                </StackPanel>
+            </StackPanel>
+
+            <PipsPager x:Name="Pips" NumberOfPages="2" HorizontalAlignment="Center" SelectedIndexChanged="OnPipsChanged" />
+
+            <Grid>
+                <Button x:Name="BackButton" Content="Back" Click="OnBack" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+                    <Button x:Name="CustomizeButton" Content="Customize the wheel" Click="OnCustomizeWheel" />
+                    <Button x:Name="NextButton" Style="{StaticResource AccentButtonStyle}" Content="Next" Click="OnNext" />
+                    <Button x:Name="FinishButton" Style="{StaticResource AccentButtonStyle}" Content="Get started" Click="OnFinish" />
+                </StackPanel>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

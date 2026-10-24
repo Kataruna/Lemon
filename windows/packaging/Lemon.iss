@@ -1,8 +1,8 @@
-; Lemon installer (Inno Setup 6). Built by ..\make-installer.ps1, which passes the version.
+; Lemon installer (Inno Setup 6). Built by make-installer.ps1, which passes the version.
 ; Installs for the current user only: no admin prompt, into %LOCALAPPDATA%\Programs\Lemon.
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.3.0"
 #endif
 
 [Setup]
@@ -25,7 +25,7 @@ UninstallDisplayIcon={app}\Lemon.exe
 UninstallDisplayName=Lemon
 Compression=lzma2/max
 SolidCompression=yes
-OutputDir=..\dist
+OutputDir=..\..\dist\Windows
 OutputBaseFilename=Lemon-Setup
 ; Lemon holds this mutex while running (also from the tray), so Setup and Uninstall ask to quit it first.
 AppMutex=Lemon.App
@@ -40,7 +40,7 @@ Name: "modelfull"; Description: "Download the higher-quality AI model: BiRefNet 
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\dist\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\Windows\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\Lemon"; Filename: "{app}\Lemon.exe"

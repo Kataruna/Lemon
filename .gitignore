@@ -3,7 +3,8 @@ obj/
 .vs/
 *.user
 dist/
+TestResults/
 
+# swift build or Xcode run by hand; make-app.sh builds into dist/MacOS
 mac/.build/
-mac/dist/
 .DS_Store

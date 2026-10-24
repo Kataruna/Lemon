@@ -24,6 +24,7 @@ internal sealed class DragGestureMonitor : IDisposable
     private bool _firedThisDrag;
     private bool _swallowingKey;
     private bool _swallowingTab;
+    private bool _swallowingEscape;
 
     public DragGestureMonitor()
     {
@@ -38,7 +39,7 @@ internal sealed class DragGestureMonitor : IDisposable
     /// <summary>The primary button was released, i.e. the drag ended (dropped or not). Raised on the hook thread.</summary>
     public event Action? ButtonReleased;
 
-    /// <summary>Esc was pressed (it also cancels the drag in the source app). Raised on the hook thread.</summary>
+    /// <summary>Esc was pressed while the wheel was up mid-drag; the drag goes on. Raised on the hook thread.</summary>
     public event Action? EscapePressed;
 
     /// <summary>
@@ -143,8 +144,27 @@ internal sealed class DragGestureMonitor : IDisposable
             var isDown = message is Native.WM_KEYDOWN or Native.WM_SYSKEYDOWN;
             var isUp = message is Native.WM_KEYUP or Native.WM_SYSKEYUP;
 
-            if (isDown && info.VirtualKey == Native.VK_ESCAPE)
-                EscapePressed?.Invoke();
+            // While the wheel is up mid-drag, Esc only closes it and the drag carries on (shake or press the wheel key to
+            // bring it back). Swallowed here, it never reaches the drag, which would cancel. Otherwise it cancels as usual.
+            if (info.VirtualKey == Native.VK_ESCAPE)
+            {
+                if (isDown && (_swallowingEscape || IsWheelOpen?.Invoke() == true && IsLeftButtonDown()))
+                {
+                    if (!_swallowingEscape)
+                    {
+                        _firedThisDrag = false;
+                        _shake.Reset();
+                        EscapePressed?.Invoke();
+                    }
+                    _swallowingEscape = true;
+                    return 1;
+                }
+                if (isUp && _swallowingEscape)
+                {
+                    _swallowingEscape = false;
+                    return 1;
+                }
+            }
 
             // 1-9 jump straight to that ring and 0 to the hub, only while the wheel is up mid-drag.
             if (isDown && info.VirtualKey is >= 0x30 and <= 0x39 && IsWheelOpen?.Invoke() == true && IsLeftButtonDown())

@@ -123,6 +123,10 @@ public sealed partial class ConvertPage : Page
 
     private void OnNoticeClosed(InfoBar sender, object args) => Queue.Notice = null;
 
+    private void OnUpdateClosed(InfoBar sender, object args) => Queue.UpdateMessage = null;
+
+    private void OnDownloadUpdate(object sender, RoutedEventArgs e) => App.OpenUpdatePage();
+
     private void OnConvert(object sender, RoutedEventArgs e) => Queue.Start();
 
     private void OnOptimizeAll(object sender, RoutedEventArgs e) => Queue.OptimizeAll();

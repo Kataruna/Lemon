@@ -50,13 +50,7 @@
                     <TextBlock
                         TextWrapping="Wrap"
                         Text="While you drag files anywhere in Windows, open a wheel of formats under the pointer. Drop the files on a format to convert them straight away, or on the lemon in the middle to add them to the queue." />
-                    <ToggleSwitch x:Name="ShakeSwitch" Header="Open it by shaking the mouse while dragging" Toggled="OnShakeToggled" />
-                    <ComboBox x:Name="WheelKeyBox" Header="Or by pressing a key while dragging" MinWidth="220" SelectionChanged="OnWheelKeyChanged" />
-                    <TextBlock
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        TextWrapping="Wrap"
-                        Text="The key is only taken over during a drag; the rest of the time it works as usual. Lemon has to be running for the wheel to appear (minimized is fine)." />
+                    <views:WheelTriggers />
                 </StackPanel>
             </Border>
 
@@ -133,12 +127,15 @@
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="4">
                     <TextBlock x:Name="VersionText" />
+                    <HyperlinkButton x:Name="UpdateLink" Click="OnDownloadUpdate" Padding="0,4" Visibility="Collapsed" />
+                    <CheckBox x:Name="UpdateCheckBox" Content="Check for updates when Lemon starts" Click="OnUpdateCheckClick" />
                     <TextBlock
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap"
                         Text="Images are converted with the built-in ImageMagick. Audio and video use FFmpeg. Documents use Pandoc and LibreOffice when they're installed." />
                     <HyperlinkButton Content="Open settings folder" Click="OnOpenSettingsFolder" Padding="0,4" />
+                    <HyperlinkButton Content="Show the welcome guide again" Click="OnShowWelcome" Padding="0,4" />
                 </StackPanel>
             </Border>
         </StackPanel>

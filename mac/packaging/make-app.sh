@@ -1,11 +1,12 @@
 #!/bin/sh
-# Builds dist/Lemon.app. Run from anywhere.
+# Builds dist/MacOS/Lemon.app at the top of the repo. Run from anywhere.
 set -e
-cd "$(dirname "$0")"
-swift build -c release
-APP=dist/Lemon.app
+cd "$(dirname "$0")/.."
+OUT=../dist/MacOS
+swift build -c release --scratch-path "$OUT/build"
+APP=$OUT/Lemon.app
 rm -rf "$APP" && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/Lemon "$APP/Contents/MacOS/Lemon"
+cp "$OUT/build/release/Lemon" "$APP/Contents/MacOS/Lemon"
 
 # Lemon.icon (Icon Composer) becomes Assets.car for macOS 26 and Lemon.icns for older systems.
 xcrun actool Lemon.icon --compile "$APP/Contents/Resources" --app-icon Lemon --target-device mac --platform macosx \
@@ -37,4 +38,4 @@ PL
 # Override with LEMON_SIGN_ID=<name or hash>; with neither available, fall back to ad-hoc.
 ID=${LEMON_SIGN_ID:-$(security find-identity -p codesigning | grep '"Thanayos Siratranont"' | head -1 | awk '{print $2}')}
 codesign --force --deep -s "${ID:--}" "$APP"
-echo "Built mac/$APP (signed with ${ID:-ad-hoc})"
+echo "Built dist/MacOS/Lemon.app (signed with ${ID:-ad-hoc})"

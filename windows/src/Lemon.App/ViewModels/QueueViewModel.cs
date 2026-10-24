@@ -65,6 +65,10 @@ public sealed partial class QueueViewModel : ObservableObject
     [ObservableProperty]
     public partial string? Notice { get; set; }
 
+    /// <summary>"Lemon 0.4.0 is available", once the startup check finds a newer version.</summary>
+    [ObservableProperty]
+    public partial string? UpdateMessage { get; set; }
+
     /// <summary>Which missing tools would let Lemon handle more of the queued files.</summary>
     [ObservableProperty]
     public partial string? MissingToolsMessage { get; private set; }

@@ -60,12 +60,22 @@
             </Button>
         </StackPanel>
 
-        <StackPanel Grid.Row="1" Spacing="8" Visibility="{x:Bind views:Ui.VisibleIfAnyText(Queue.Notice, Queue.MissingToolsMessage), Mode=OneWay}">
+        <StackPanel Grid.Row="1" Spacing="8">
             <InfoBar
                 Severity="Warning"
                 IsOpen="{x:Bind views:Ui.HasText(Queue.Notice), Mode=OneWay}"
                 Message="{x:Bind Queue.Notice, Mode=OneWay}"
                 CloseButtonClick="OnNoticeClosed" />
+            <InfoBar
+                Severity="Success"
+                Title="Update available"
+                IsOpen="{x:Bind views:Ui.HasText(Queue.UpdateMessage), Mode=OneWay}"
+                Message="{x:Bind Queue.UpdateMessage, Mode=OneWay}"
+                CloseButtonClick="OnUpdateClosed">
+                <InfoBar.ActionButton>
+                    <Button Content="Download" Click="OnDownloadUpdate" />
+                </InfoBar.ActionButton>
+            </InfoBar>
             <InfoBar
                 Severity="Informational"
                 Title="More formats available"

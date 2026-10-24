@@ -5,7 +5,7 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <RootNamespace>Lemon.App</RootNamespace>
     <AssemblyName>Lemon</AssemblyName>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Lemon.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>

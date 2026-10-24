@@ -1,0 +1,7 @@
+<Project>
+  <!-- All build output (bin, obj, publish, test results) goes to dist/Windows at the top of the repo, not next to the source. -->
+  <PropertyGroup>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)..\dist\Windows\build</ArtifactsPath>
+    <TestingPlatformCommandLineArguments>--results-directory "$(MSBuildThisFileDirectory)..\dist\Windows\TestResults"</TestingPlatformCommandLineArguments>
+  </PropertyGroup>
+</Project>

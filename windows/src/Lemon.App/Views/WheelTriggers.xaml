@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Lemon.App.Views.WheelTriggers"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- How the wheel opens; on both Settings and Settings › Wheel. -->
+    <StackPanel Spacing="8">
+        <ToggleSwitch x:Name="ShakeSwitch" Header="Open it by shaking the mouse while dragging" Toggled="OnShakeToggled" />
+        <ToggleSwitch x:Name="KeySwitch" Header="Open it by pressing a key while dragging" Toggled="OnKeyToggled" />
+        <StackPanel Orientation="Horizontal" Spacing="12">
+            <TextBlock Text="Key" VerticalAlignment="Center" />
+            <Button x:Name="WheelKeyButton" MinWidth="140" Click="OnWheelKeyClick" PreviewKeyDown="OnWheelKeyPressed" LostFocus="OnWheelKeyLostFocus" />
+        </StackPanel>
+        <InfoBar x:Name="TriggerInfo" Severity="Informational" IsClosable="True" />
+        <TextBlock
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap"
+            Text="To change the key, click it and press the one you want (Esc cancels). The key is only taken over during a drag; the rest of the time it works as usual. Lemon has to be running for the wheel to appear (minimized is fine)." />
+    </StackPanel>
+</UserControl>
