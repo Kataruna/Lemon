@@ -12,7 +12,8 @@ Lemon is on the [Releases page](https://github.com/Kataruna/Lemon/releases). Win
   - [Remove background models](#remove-background-models-on-windows)
   - [Updating and uninstalling](#updating-and-uninstalling-on-windows)
 - [Mac](#mac)
-  - [Install](#install-on-mac)
+  - [Install with Homebrew](#install-with-homebrew)
+  - [Install from the release](#install-from-the-release)
   - [Opening it the first time](#opening-it-the-first-time)
   - [Accessibility permission](#accessibility-permission)
   - [First steps](#first-steps-on-mac)
@@ -113,7 +114,17 @@ Either way, settings, presets and models stay in `%LOCALAPPDATA%\Lemon` in case 
 
 You need a Mac with **Apple silicon** (M1 or later) and **macOS 14 Sonoma** or later. Intel Macs aren't supported by the release build.
 
-### Install on Mac
+### Install with Homebrew
+
+```sh
+brew install --cask kataruna/tap/lemon
+```
+
+This installs Lemon.app into Applications from the latest release. You still need to [open it the first time](#opening-it-the-first-time). Update with `brew upgrade --cask lemon`; remove with `brew uninstall --cask lemon` (add `--zap` to also remove its settings and models).
+
+### Install from the release
+
+Without Homebrew:
 
 1. Download **Lemon-x.y.z-mac.zip** from the release and double-click it to unzip.
 2. Drag **Lemon.app** into your **Applications** folder (replace the old one when updating).

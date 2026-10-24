@@ -6,7 +6,7 @@ A drag-and-drop file converter for **Windows** and **macOS**. Drop in pictures, 
 
 <p align="center"><img src="docs/images/wheel.png" width="640" alt="The conversion wheel open over a Finder window, with a photo resting on JPG"></p>
 
-**Download:** [Releases page](https://github.com/Kataruna/Lemon/releases) (Windows releases are tagged `windows-v…`, Mac releases `mac-v…`). See the [install guide](INSTALL.md).
+**Download:** [Releases page](https://github.com/Kataruna/Lemon/releases) (Windows releases are tagged `windows-v…`, Mac releases `mac-v…`). On a Mac, also `brew install --cask kataruna/tap/lemon`. See the [install guide](INSTALL.md).
 
 | Guide | What's in it |
 |---|---|
