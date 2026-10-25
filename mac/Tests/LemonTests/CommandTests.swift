@@ -38,3 +38,43 @@ final class CommandTests: XCTestCase {
         XCTAssertTrue(m.modes.isEmpty)
     }
 }
+
+final class CommandTokenTests: XCTestCase {
+    func testChipsRoundTrip() {
+        let s = chipString("open {folder} {x} {files} {url} {", font: .systemFont(ofSize: 12))
+        XCTAssertEqual(chipText(s), "open {folder} {x} {files} {link} {")   // {url} comes back as {link}
+    }
+
+    func testFilesInFolder() {
+        XCTAssertEqual(commandLine("ls {folder} {files}", "/a b", files: ["/a b/x", "/a b/y'z"]), #"ls '/a b' '/a b/x' '/a b/y'\''z'"#)
+    }
+
+    func testFileTypes() {
+        let c = WheelCommand(name: "PDF", line: "x {file}", runsOn: .files, types: "pdf, .PNG")
+        XCTAssertTrue(c.takes(URL(fileURLWithPath: "/a.PDF")))
+        XCTAssertTrue(c.takes(URL(fileURLWithPath: "/a.png")))
+        XCTAssertFalse(c.takes(URL(fileURLWithPath: "/a.txt")))
+        XCTAssertTrue(WheelCommand(runsOn: .files).takes(URL(fileURLWithPath: "/a.zip")))
+    }
+
+    func testOldSavedCommandStillDecodes() throws {
+        let c = try JSONDecoder().decode(WheelCommand.self, from: Data(#"{"id":"1","name":"Keep","symbol":"link","forLinks":true,"line":"k {url}"}"#.utf8))
+        XCTAssertEqual(c.on, .links)
+    }
+}
+
+@MainActor final class FileCommandRingTests: XCTestCase {
+    private var saved: [WheelCommand]?
+    override func setUp() async throws { saved = PrefStore.shared.p.commands }
+    override func tearDown() async throws { PrefStore.shared.p.commands = saved }
+
+    func testFileCommandOnlyForItsTypes() {
+        PrefStore.shared.p.commands = [WheelCommand(name: "Sign", line: "sign {file}", runsOn: .files, types: "pdf")]
+        let pdf = URL(fileURLWithPath: "/tmp/a.pdf"), txt = URL(fileURLWithPath: "/tmp/b.zip")
+        let m = WheelModel(); m.load([], files: [pdf, txt])
+        XCTAssertEqual(m.choices.map(\.name), ["Sign"])
+        XCTAssertEqual(m.targets(PrefStore.shared.p.commands![0]), [pdf])
+        m.load([], files: [txt])
+        XCTAssertTrue(m.modes.isEmpty)
+    }
+}

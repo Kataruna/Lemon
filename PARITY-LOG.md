@@ -11,6 +11,19 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-25: Commands for files, and placeholder chips
+
+| Windows | Mac |
+|---|---|
+| **To do** | **Done** (the original) |
+
+- Commands can run on **Files** too (*Runs on: Files · Folders · Links*), with optional file types (`pdf, png`; empty means any). They run once per matching dragged file, in its folder. A file command also opens the wheel for files Lemon can't convert. Files still open on their usual ring.
+- Placeholders are `{file}`, `{folder}`, `{files}` (the files directly inside the folder, sorted, no hidden ones, each quoted, one run per folder) and `{link}`. `{path}` / `{url}` still work.
+- The command box shows each placeholder as a colored chip (File blue, Folder orange, Files in Folder purple, Link green), with buttons under it to insert the ones that fit *Runs on* at the cursor. Copy and paste carry the `{…}` text, and typed placeholders turn into chips. Smart quotes and dashes are off in the box.
+- Mac files: `Wheel/Commands.swift` (`RunsOn`, `Token`, `WheelCommand.on/takes`), `Settings/ChipField.swift`, `Wheel/Wheel.swift` (`WheelModel.targets`), `Settings/Customize.swift` (`CommandEditor`). Saved commands from the first version (`forLinks`) still decode.
+
+---
+
 ## 2026-10-25: Commands ring for dragged folders and links
 
 | Windows | Mac |

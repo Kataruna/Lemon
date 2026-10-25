@@ -337,7 +337,7 @@ struct WheelSettings: View {
                     HStack {
                         Label(c.name, systemImage: c.symbol)
                         Spacer()
-                        Text(c.forLinks ? "Links" : "Folders").foregroundStyle(.secondary)
+                        Text(c.on.rawValue).foregroundStyle(.secondary)
                         // Wheel order, clockwise from the top.
                         Button { store.p.commands?.swapAt(i, i - 1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless).disabled(i == 0)
                         Button { store.p.commands?.swapAt(i, i + 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless).disabled(i == commands.count - 1)
@@ -347,7 +347,7 @@ struct WheelSettings: View {
                 }
                 Button("New Command…") { editingCommand = WheelCommand() }
             } header: { Text("Commands") } footer: {
-                Text("Your own shell commands for dragged folders and links, on a Commands ring. A folder dragged on its own opens on it. Up to 8 of each.")
+                Text("Your own shell commands for dragged files, folders and links, on a Commands ring. A folder dragged on its own opens on it. Up to 8 of each.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -637,6 +637,7 @@ struct CommandEditor: View {
     @State var command: WheelCommand
     @ObservedObject private var store = PrefStore.shared
     @Environment(\.dismiss) private var dismiss
+    private let field = ChipFieldControl()
 
     private func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -648,17 +649,27 @@ struct CommandEditor: View {
                     Picker("Icon", selection: $command.symbol) {
                         ForEach(WheelCommand.symbols, id: \.self) { Image(systemName: $0).tag($0) }
                     }
-                    Picker("Runs on", selection: $command.forLinks) {
-                        Text("Folders").tag(false)
-                        Text("Links").tag(true)
+                    Picker("Runs on", selection: Binding(get: { command.on }, set: { command.runsOn = $0; command.forLinks = $0 == .links })) {
+                        ForEach(RunsOn.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                     }.pickerStyle(.segmented)
+                    if command.on == .files {
+                        TextField("File types", text: Binding(get: { command.types ?? "" }, set: { command.types = $0 }), prompt: Text("pdf, png (empty: any file)"))
+                    }
                 }
                 Section {
-                    TextField("Command", text: $command.line, prompt: Text(command.forLinks ? "my-tool save {url}" : #"open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && exec zsh -l' {path}"#), axis: .vertical)
-                        .font(.system(.body, design: .monospaced)).lineLimit(3...6).labelsHidden()
+                    ChipField(text: $command.line, control: field)
+                        .frame(height: 72)
+                    HStack(spacing: 6) {
+                        Text("Insert").foregroundStyle(.secondary)
+                        ForEach(Token.offered(command.on), id: \.self) { t in
+                            Button { field.insert(t) } label: {
+                                HStack(spacing: 3) { Image(systemName: "plus"); Text(t.label) }.font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                                    .padding(.horizontal, 8).padding(.vertical, 3).background(Capsule().fill(Color(nsColor: t.color)))
+                            }.buttonStyle(.plain)
+                        }
+                    }
                 } header: { Text("Command") } footer: {
-                    Text("{path} is the folder, {url} the link, already quoted: don't put quotes around them. Runs in zsh, once for each item dropped, in the folder (for a link, your home folder). If it fails, Lemon shows what it printed.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(footer).font(.caption).foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -668,7 +679,16 @@ struct CommandEditor: View {
                 Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(trimmed(command.name).isEmpty || trimmed(command.line).isEmpty)
             }.padding()
         }
-        .frame(width: 460, height: 400)
+        .frame(width: 480, height: 440)
+    }
+
+    private var footer: String {
+        let what = switch command.on {
+        case .files: "File is the dragged file; the command runs once for each, in the file's folder."
+        case .folders: "Folder is the dragged folder, Files in Folder the files directly inside it; the command runs once for each folder, in it."
+        case .links: "Link is the dragged link; the command runs once for each, in your home folder."
+        }
+        return what + " Chips are quoted for you: don't put quotes around them. Runs in zsh. If it fails, Lemon shows what it printed."
     }
 
     private func save() {

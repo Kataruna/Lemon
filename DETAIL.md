@@ -73,10 +73,11 @@ The *Wheel* tab in Settings has a live preview at the top and sets:
 
 ## Commands (Mac)
 
-The **Commands** ring runs your own shell commands on a dragged **folder** or **link**. Set them up in *Settings › Wheel › Commands*. Each one has a name, an icon, what it runs on (*Folders* or *Links*) and a command line. Up to 8 of each kind go on the ring, in Settings order.
+The **Commands** ring runs your own shell commands on dragged **files**, **folders** or **links**. Set them up in *Settings › Wheel › Commands*. Each one has a name, an icon, what it runs on (*Files*, optionally only some types such as `pdf, png`; *Folders*; or *Links*) and a command line. Up to 8 go on the ring, in Settings order.
 
-- `{path}` becomes the folder and `{url}` the link. Both are already quoted for the shell, so don't put quotes around them.
-- The line runs in a login `zsh` (so Homebrew's tools are on `PATH`), once for each item dropped, in that folder (for a link, your home folder). Lemon doesn't wait for it.
+- In the editor the placeholders are colored chips: **File**, **Folder**, **Files in Folder** (the files directly inside the folder, each as its own argument) and **Link**. The buttons under the box insert one at the cursor; typing `{file}`, `{folder}`, `{files}` or `{link}` turns into a chip too, and copying a chip copies that text. The first version's `{path}` and `{url}` still work. Chips are quoted for the shell already, so don't put quotes around them.
+- The line runs in a login `zsh` (so Homebrew's tools are on `PATH`), once for each item dropped, in that folder (a file's own folder; for a link, your home folder). Lemon doesn't wait for it.
+- A file command also opens the wheel for files Lemon can't convert, like `.zip`; files keep opening on their usual ring, with Commands as one more.
 - A folder dragged on its own opens the wheel on Commands, even when there's nothing in it to convert. A folder dragged with files gets Commands as one more ring.
 - A link from a browser opens a wheel with only the Commands ring. With no link commands, a link drag doesn't open the wheel.
 - If a command fails (it stops with an error, or won't start), an alert shows its name and the end of what it printed.
@@ -85,10 +86,12 @@ Examples:
 
 | Name | Runs on | Command |
 |---|---|---|
-| Terminal | Folders | `open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && exec zsh -l' {path}` |
-| Claude | Folders | `open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && claude; exec zsh -l' {path}` |
-| VS Code | Folders | `open -a "Visual Studio Code" {path}` |
-| Save for later | Links | `echo {url} >> ~/Desktop/later.txt` |
+| Terminal | Folders | `open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && exec zsh -l' {folder}` |
+| Claude | Folders | `open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && claude; exec zsh -l' {folder}` |
+| VS Code | Folders | `open -a "Visual Studio Code" {folder}` |
+| Zip the files | Folders | `zip -j "$HOME/Desktop/files.zip" {files}` |
+| Copy path | Files | `printf %s {file} \| pbcopy` |
+| Save for later | Links | `echo {link} >> ~/Desktop/later.txt` |
 
 Ghostty ignores `--working-directory` when it's given `-e`, which is why the examples `cd` into the folder (passed as `$0`) themselves.
 

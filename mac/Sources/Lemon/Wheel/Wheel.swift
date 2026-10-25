@@ -151,15 +151,20 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
     /// The wheel opens centered on the pointer, so the center only leads back to the hub once the pointer has left it
     /// since this ring came up; otherwise a pause right after the shake would send the files to the hub on its own.
     private var centerArmed = false
-    /// The dragged folders and links, for a drop on the Commands ring.
-    private(set) var folders: [URL] = [], links: [URL] = []
+    /// The dragged files (not what's inside folders), folders and links, for a drop on the Commands ring.
+    private(set) var files: [URL] = [], folders: [URL] = [], links: [URL] = []
 
-    func load(_ urls: [URL], folders: [URL] = [], links: [URL] = []) {
+    /// The dragged items a command runs on.
+    func targets(_ c: WheelCommand) -> [URL] {
+        switch c.on { case .files: files.filter(c.takes); case .folders: folders; case .links: links }
+    }
+
+    func load(_ urls: [URL], files: [URL] = [], folders: [URL] = [], links: [URL] = []) {
         shown = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil; centerArmed = false
-        self.folders = folders; self.links = links
+        self.files = files; self.folders = folders; self.links = links
         let main = mainKind(urls), table = presetTable(urls), hidden = PrefStore.shared.p.hidden ?? []
         byMode = main.map { main in Dictionary(uniqueKeysWithValues: WheelMode.all.map { ($0, wheelChoices(table, main: main, $0)) }) } ?? [:]
-        byMode[.commands] = (PrefStore.shared.p.commands ?? []).filter { $0.forLinks ? !links.isEmpty : !folders.isEmpty }
+        byMode[.commands] = (PrefStore.shared.p.commands ?? []).filter { !targets($0).isEmpty }
             .prefix(8).map { Preset(name: $0.name, ext: "cmd", kind: .document, command: $0.id) }
         modes = WheelMode.all.filter { !hidden.contains($0.id) && !(byMode[$0] ?? []).isEmpty }
         start = PrefStore.shared.p.hub == true ? "hub" : main.flatMap { PrefStore.shared.p.start?[$0] }
@@ -587,29 +592,31 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
         // A link counts as a link even when the browser adds a file for it, but only with a command for links: otherwise
         // a drag carrying both still converts its files.
-        if (PrefStore.shared.p.commands ?? []).contains(where: \.forLinks) {
+        if (PrefStore.shared.p.commands ?? []).contains { $0.on == .links } {
             let links = (pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []).filter { ["http", "https"].contains($0.scheme?.lowercased()) }
             if !links.isEmpty { show([], links: links); return }
         }
         guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
-        let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
+        // Any file a command for files takes, even one Lemon can't convert.
+        let fileCommands = (PrefStore.shared.p.commands ?? []).filter { $0.on == .files }
+        let flat = urls.filter { u in kindOf[ext(of: u)] != nil || u.hasDirectoryPath || fileCommands.contains { $0.takes(u) } }
         if !flat.isEmpty { show(flat) }
     }
 
     private func show(_ urls: [URL], links: [URL] = []) {
         // Folders: look inside so the right formats are offered. This runs mid-drag on the main thread, so only a
         // sample is read; the formats on offer come from the extensions found.
-        var files: [URL] = [], folders: [URL] = []
+        var files: [URL] = [], loose: [URL] = [], folders: [URL] = []
         for u in urls {
             // A package (an app, a Photos library) is one item, not a folder to look inside.
-            guard u.hasDirectoryPath, !NSWorkspace.shared.isFilePackage(atPath: u.path) else { files.append(u); continue }
+            guard u.hasDirectoryPath, !NSWorkspace.shared.isFilePackage(atPath: u.path) else { files.append(u); loose.append(u); continue }
             folders.append(u)
             guard let it = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             var scanned = 0
             // ponytail: first 5,000 entries; a rare type deep in a huge folder may be missed (the drop still adds all).
             while scanned < 5_000, let f = it.nextObject() as? URL { scanned += 1; if kindOf[ext(of: f)] != nil { files.append(f) } }
         }
-        model.load(files, folders: folders, links: links)
+        model.load(files, files: loose, folders: folders, links: links)
         guard !model.modes.isEmpty else { return }
         // Folders on their own open on Commands: a project folder nearly always has something convertible inside.
         if !folders.isEmpty, folders.count == urls.count { model.go(.commands) }
@@ -642,7 +649,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private func pick(_ p: Preset, _ urls: [URL]) {
         hide()
         if let id = p.command {
-            if let c = PrefStore.shared.p.commands?.first(where: { $0.id == id }) { runCommand(c, on: c.forLinks ? model.links : model.folders) }
+            if let c = PrefStore.shared.p.commands?.first(where: { $0.id == id }) { runCommand(c, on: model.targets(c)) }
         } else { sharedQueue.addAndRun(urls, p) }
     }
 
