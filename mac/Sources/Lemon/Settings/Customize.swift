@@ -334,7 +334,7 @@ struct WheelSettings: View {
                 Toggle("Open on the hub", isOn: Binding(get: { store.p.hub ?? false }, set: { store.p.hub = $0 }))
                 Toggle("Back to the hub from a button under the ring", isOn: Binding(get: { store.p.backPill ?? false }, set: { store.p.backPill = $0 }))
                 if !(store.p.hub ?? false) {
-                    let rings = WheelMode.all.filter { !(store.p.hidden ?? []).contains($0.id) }
+                    let rings = WheelMode.all.filter { !(store.p.hidden ?? []).contains($0.id) && $0 != .commands }
                     ForEach(Kind.allCases, id: \.self) { k in
                         Picker(k.rawValue, selection: Binding(get: { rings.first { $0.id == store.p.start?[k] }?.id ?? rings.first?.id ?? "" }, set: { v in
                             var s = store.p.start ?? [:]; s[k] = v; store.p.start = s

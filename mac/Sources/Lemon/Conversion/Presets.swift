@@ -28,6 +28,7 @@ struct Preset: Identifiable, Hashable, Codable {
     var fps: Int? = nil
     var strip = false
     var removeBackground: BGEngine? = nil   // always writes a transparent PNG
+    var command: String? = nil              // a WheelCommand's id: a wedge on the Commands ring, not a conversion
     /// Resize: shrinks an image to fit maxWidth x maxHeight in its own format.
     var isResize: Bool { ext.isEmpty && strength == nil }
 }

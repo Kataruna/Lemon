@@ -46,21 +46,24 @@ let favorites: [Kind: [String]] = [
 
 /// One of the wheel's rings: built in, or made by the user in Settings. Tab cycles them, 1–9 jump straight to one.
 struct WheelMode: Hashable {
-    let id: String   // "convert", "optimize", "tools", or a custom ring's id
+    let id: String   // "convert", "optimize", "tools", "commands", or a custom ring's id
     static let convert = WheelMode(id: "convert"), optimize = WheelMode(id: "optimize"), tools = WheelMode(id: "tools"), resize = WheelMode(id: "resize")
     static let builtIns = [convert, optimize, tools, resize]
-    /// Built-in rings first, then the user's, in Settings order.
-    static var all: [WheelMode] { builtIns + (PrefStore.shared.p.rings ?? []).map { WheelMode(id: $0.id) } }
+    /// The user's commands for dragged folders and links. Not one of the built-ins Settings can hide: no commands, no ring.
+    static let commands = WheelMode(id: "commands")
+    /// Built-in rings first, then the user's, in Settings order, then Commands.
+    static var all: [WheelMode] { builtIns + (PrefStore.shared.p.rings ?? []).map { WheelMode(id: $0.id) } + [commands] }
     var custom: CustomRing? { PrefStore.shared.p.rings?.first { $0.id == id } }
-    var title: String { custom?.name ?? ["convert": "Convert", "optimize": "Optimize", "tools": "Cut out", "resize": "Resize"][id] ?? "" }
-    var symbol: String { custom?.symbol ?? ["convert": "arrow.triangle.2.circlepath", "optimize": "arrow.down.right.and.arrow.up.left", "tools": "scissors", "resize": "arrow.up.left.and.arrow.down.right"][id] ?? "star" }
-    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background", "resize": "Shrink images"][id] ?? "" }
+    var title: String { custom?.name ?? ["convert": "Convert", "optimize": "Optimize", "tools": "Cut out", "resize": "Resize", "commands": "Commands"][id] ?? "" }
+    var symbol: String { custom?.symbol ?? ["convert": "arrow.triangle.2.circlepath", "optimize": "arrow.down.right.and.arrow.up.left", "tools": "scissors", "resize": "arrow.up.left.and.arrow.down.right", "commands": "terminal"][id] ?? "star" }
+    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background", "resize": "Shrink images", "commands": "Your commands"][id] ?? "" }
     func holds(_ p: Preset) -> Bool {
         if let c = custom { return c.presets.contains(p.name) }
         switch self {
         case .convert: return p.strength == nil && p.removeBackground == nil && !p.isResize
         case .resize: return p.isResize
         case .optimize: return p.strength != nil
+        case .commands: return false   // filled from Prefs.commands in WheelModel.load
         default: return p.removeBackground != nil
         }
     }
@@ -102,6 +105,7 @@ func wheelChoices(_ table: [(kind: Kind, presets: [Preset])], main: Kind, _ mode
 
 /// "MP4" over "720p small": the format over what makes the preset different.
 func wheelLabel(_ p: Preset) -> (String, String?) {
+    if p.command != nil { return (p.name, nil) }
     if p.isResize, let side = p.maxWidth ?? p.maxHeight { return (String(p.name.split(separator: "–").last ?? "").trimmingCharacters(in: .whitespaces), "\(side) px") }
     if let e = p.removeBackground { return [BGEngine.vision: ("Quick", "Apple Vision"), .lite: ("Lite", "BiRefNet"), .full: ("Full", "Best quality")][e]! }
     if let s = p.strength { return (s.rawValue, [Strength.lossless: "Same pixels", .balanced: "Looks the same", .smaller: "Slightly lower quality"][s]) }
@@ -147,11 +151,16 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
     /// The wheel opens centered on the pointer, so the center only leads back to the hub once the pointer has left it
     /// since this ring came up; otherwise a pause right after the shake would send the files to the hub on its own.
     private var centerArmed = false
+    /// The dragged folders and links, for a drop on the Commands ring.
+    private(set) var folders: [URL] = [], links: [URL] = []
 
-    func load(_ urls: [URL]) {
+    func load(_ urls: [URL], folders: [URL] = [], links: [URL] = []) {
         shown = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil; centerArmed = false
+        self.folders = folders; self.links = links
         let main = mainKind(urls), table = presetTable(urls), hidden = PrefStore.shared.p.hidden ?? []
         byMode = main.map { main in Dictionary(uniqueKeysWithValues: WheelMode.all.map { ($0, wheelChoices(table, main: main, $0)) }) } ?? [:]
+        byMode[.commands] = (PrefStore.shared.p.commands ?? []).filter { $0.forLinks ? !links.isEmpty : !folders.isEmpty }
+            .prefix(8).map { Preset(name: $0.name, ext: "cmd", kind: .document, command: $0.id) }
         modes = WheelMode.all.filter { !hidden.contains($0.id) && !(byMode[$0] ?? []).isEmpty }
         start = PrefStore.shared.p.hub == true ? "hub" : main.flatMap { PrefStore.shared.p.start?[$0] }
         // The chosen ring if these files have anything on it, else the hub (when there is one) or the first ring.
@@ -275,6 +284,7 @@ extension View {
 
 /// SF Symbol for a wheel segment.
 func wheelSymbol(_ p: Preset) -> String {
+    if let id = p.command { return PrefStore.shared.p.commands?.first { $0.id == id }?.symbol ?? "terminal" }
     if let e = p.removeBackground { return [BGEngine.vision: "scissors", .lite: "wand.and.stars", .full: "sparkles"][e]! }
     switch p.strength {
     case .lossless: return "checkmark.seal"
@@ -433,7 +443,7 @@ final class WheelHost: NSHostingView<WheelView> {
     init(model: WheelModel) {
         self.model = model
         super.init(rootView: WheelView(model: model))
-        registerForDraggedTypes([.fileURL])
+        registerForDraggedTypes([.fileURL, .URL])
     }
     @available(*, unavailable) required init(rootView: WheelView) { fatalError() }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -459,7 +469,7 @@ final class WheelHost: NSHostingView<WheelView> {
         let target = model.hovered, queue = model.lemonHot && !model.centerBack
         model.clearHover()
         if let target { onPick?(target, urls); return true }
-        if queue { onQueue?(urls); return true }
+        if queue, !urls.isEmpty { onQueue?(urls); return true }   // a link has nothing to queue
         return false
     }
 }
@@ -571,29 +581,35 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         }
     }
 
-    /// Only a drag that put files on the drag pasteboard counts.
+    /// Only a drag that put files or a web link on the drag pasteboard counts.
     private func open() {
         guard down, !fired, pb.changeCount != dragCount else { return }
         fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
+        // A link counts as a link even when the browser adds a file for it.
+        let links = (pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []).filter { ["http", "https"].contains($0.scheme?.lowercased()) }
+        if !links.isEmpty { show([], links: links); return }
         guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
         let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
         if !flat.isEmpty { show(flat) }
     }
 
-    private func show(_ urls: [URL]) {
+    private func show(_ urls: [URL], links: [URL] = []) {
         // Folders: look inside so the right formats are offered. This runs mid-drag on the main thread, so only a
         // sample is read; the formats on offer come from the extensions found.
-        var files: [URL] = []
+        var files: [URL] = [], folders: [URL] = []
         for u in urls {
             // A package (an app, a Photos library) is one item, not a folder to look inside.
             guard u.hasDirectoryPath, !NSWorkspace.shared.isFilePackage(atPath: u.path) else { files.append(u); continue }
+            folders.append(u)
             guard let it = FileManager.default.enumerator(at: u, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
             var scanned = 0
             // ponytail: first 5,000 entries; a rare type deep in a huge folder may be missed (the drop still adds all).
             while scanned < 5_000, let f = it.nextObject() as? URL { scanned += 1; if kindOf[ext(of: f)] != nil { files.append(f) } }
         }
-        model.load(files)
+        model.load(files, folders: folders, links: links)
         guard !model.modes.isEmpty else { return }
+        // Folders on their own open on Commands: a project folder nearly always has something convertible inside.
+        if !folders.isEmpty, folders.count == urls.count { model.go(.commands) }
         installKeyTap()   // in case permission was granted since launch
         if panel == nil {
             let p = WheelPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -621,7 +637,10 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     private func pick(_ p: Preset, _ urls: [URL]) {
-        hide(); sharedQueue.addAndRun(urls, p)
+        hide()
+        if let id = p.command {
+            if let c = PrefStore.shared.p.commands?.first(where: { $0.id == id }) { runCommand(c, on: c.forLinks ? model.links : model.folders) }
+        } else { sharedQueue.addAndRun(urls, p) }
     }
 
     private func queueIt(_ urls: [URL]) {
