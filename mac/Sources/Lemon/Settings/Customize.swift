@@ -255,6 +255,7 @@ struct WheelSettings: View {
     @StateObject private var preview = WheelModel()
     @State private var kind = Kind.image
     @State private var editingRing: CustomRing?
+    @State private var editingCommand: WheelCommand?
 
     var body: some View {
         let t = store.p.theme
@@ -331,6 +332,25 @@ struct WheelSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                let commands = store.p.commands ?? []
+                ForEach(Array(commands.enumerated()), id: \.element.id) { i, c in
+                    HStack {
+                        Label(c.name, systemImage: c.symbol)
+                        Spacer()
+                        Text(c.forLinks ? "Links" : "Folders").foregroundStyle(.secondary)
+                        // Wheel order, clockwise from the top.
+                        Button { store.p.commands?.swapAt(i, i - 1) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless).disabled(i == 0)
+                        Button { store.p.commands?.swapAt(i, i + 1) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless).disabled(i == commands.count - 1)
+                        Button("Edit") { editingCommand = c }
+                        Button { store.p.commands?.removeAll { $0.id == c.id } } label: { Image(systemName: "trash") }.buttonStyle(.borderless)
+                    }
+                }
+                Button("New Command…") { editingCommand = WheelCommand() }
+            } header: { Text("Commands") } footer: {
+                Text("Your own shell commands for dragged folders and links, on a Commands ring. A folder dragged on its own opens on it. Up to 8 of each.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Toggle("Open on the hub", isOn: Binding(get: { store.p.hub ?? false }, set: { store.p.hub = $0 }))
                 Toggle("Back to the hub from a button under the ring", isOn: Binding(get: { store.p.backPill ?? false }, set: { store.p.backPill = $0 }))
                 if !(store.p.hub ?? false) {
@@ -351,6 +371,7 @@ struct WheelSettings: View {
         }
         .settingsPage(height: 640)
         .sheet(item: $editingRing) { RingEditor(ring: $0) }
+        .sheet(item: $editingCommand) { CommandEditor(command: $0) }
         .onAppear(perform: reloadPreview)
         // Not on theme changes: the preview redraws with those by itself, and a slider sends dozens a second.
         .onChange(of: store.p.slots) { reloadPreview() }
@@ -608,6 +629,53 @@ struct RingEditor: View {
         var rings = store.p.rings ?? []
         if let i = rings.firstIndex(where: { $0.id == r.id }) { rings[i] = r } else { rings.append(r) }
         store.p.rings = rings
+        dismiss()
+    }
+}
+
+struct CommandEditor: View {
+    @State var command: WheelCommand
+    @ObservedObject private var store = PrefStore.shared
+    @Environment(\.dismiss) private var dismiss
+
+    private func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Form {
+                Section {
+                    TextField("Name", text: $command.name)
+                    Picker("Icon", selection: $command.symbol) {
+                        ForEach(WheelCommand.symbols, id: \.self) { Image(systemName: $0).tag($0) }
+                    }
+                    Picker("Runs on", selection: $command.forLinks) {
+                        Text("Folders").tag(false)
+                        Text("Links").tag(true)
+                    }.pickerStyle(.segmented)
+                }
+                Section {
+                    TextField("Command", text: $command.line, prompt: Text(command.forLinks ? "my-tool save {url}" : #"open -na Ghostty --args -e /bin/zsh -lc 'cd "$0" && exec zsh -l' {path}"#), axis: .vertical)
+                        .font(.system(.body, design: .monospaced)).lineLimit(3...6).labelsHidden()
+                } header: { Text("Command") } footer: {
+                    Text("{path} is the folder, {url} the link, already quoted: don't put quotes around them. Runs in zsh, once for each item dropped, in the folder (for a link, your home folder). If it fails, Lemon shows what it printed.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(trimmed(command.name).isEmpty || trimmed(command.line).isEmpty)
+            }.padding()
+        }
+        .frame(width: 460, height: 400)
+    }
+
+    private func save() {
+        var c = command; c.name = trimmed(c.name); c.line = trimmed(c.line)
+        var all = store.p.commands ?? []
+        if let i = all.firstIndex(where: { $0.id == c.id }) { all[i] = c } else { all.append(c) }
+        store.p.commands = all
         dismiss()
     }
 }

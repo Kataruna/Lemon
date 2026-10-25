@@ -11,6 +11,20 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-25: Commands ring for dragged folders and links
+
+| Windows | Mac |
+|---|---|
+| **To do** | **Done** (the original) |
+
+- *Settings › Wheel › Commands*: the user's own shell lines, each with a name, an icon, *Folders* or *Links*, and the line. Up to 8 of each kind go on a **Commands** ring, in Settings order. Not one of the hideable built-in rings, and not offered in *Opens on*. No commands means no ring.
+- Dropping on one runs the line once per dragged item, in a login shell, without waiting. `{path}` / `{url}` become the item, single-quoted for the shell. A non-zero exit or launch error shows an alert with the command's name and the end of its stderr.
+- A drag of only folders opens on Commands, even with nothing convertible inside. A drag with an http(s) link counts as a link (even if the browser also adds a file) and gets only the Commands ring. Dropping a link on the lemon does nothing.
+- Mac files: `mac/Sources/Lemon/Wheel/Commands.swift` (model, `commandLine`, `runCommand`), `Wheel/Wheel.swift` (`WheelMode.commands`, `WheelModel.load(_:folders:links:)`, `WheelController.open/show/pick`), `Settings/Customize.swift` (`CommandEditor`, Commands section), `Conversion/Presets.swift` (`Preset.command`).
+- Windows notes: the wheel already opens for a link drag (it reads the data after it opens), but `WheelWindow` only reads `StorageItems`, so a link drop is ignored. Read `StandardDataFormats.WebLink` / `Uri` there. Folder paths come through `GetStorageItemsAsync` already. Run with `cmd /c` or PowerShell, quoting for that shell.
+
+---
+
 ## 2026-10-24: Welcome demo shows the real wheel; wheel hints follow the settings
 
 | Windows | Mac |

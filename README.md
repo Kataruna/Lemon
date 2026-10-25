@@ -18,6 +18,7 @@ A drag-and-drop file converter for **Windows** and **macOS**. Drop in pictures, 
 
 - **Conversion wheel.** While you drag files from anywhere (File Explorer, Finder, the desktop, a browser…), shake the mouse or press a key (Space on Windows, Shift on Mac, or your own) and a round menu of formats opens under the pointer. Drop on a format to convert right away; drop on the lemon in the middle to add the files to the queue. **Esc** closes the wheel without cancelling the drag.
 - **Rings.** The wheel has rings for *Convert*, *Optimize*, *Cut out* (remove the background) and *Resize*, plus up to five rings of your own. Switch with **Tab**, the number keys, the scroll wheel, or by resting the files on a ring's name. A hub can show all the rings at once.
+- **Commands (Mac).** Your own shell commands on a Commands ring for dragged folders and links: shake a project folder to open it in your terminal or editor, or a link from the browser to hand it to your own tool. See [DETAIL.md](DETAIL.md#commands-mac).
 - **Batch queue.** Drop files or whole folders on the window, give each file its own preset (or use *Set all to*), and convert them in parallel with live progress.
 - **Optimize.** Makes images, videos and PDFs smaller in the same format, with the quality kept close to the original, in three strengths: *Lossless*, *Balanced* and *Smaller*.
 - **Remove background.** Cuts the subject out of a picture onto a transparent PNG, with the BiRefNet AI model running on your own computer (and Apple Vision on the Mac).
