@@ -90,7 +90,7 @@ Steps:
 3. Publish a full release (not a draft or pre-release, which the update check skips) on `main`, for example:
 
    ```sh
-   gh release create mac-v0.3.0 dist/MacOS/Lemon-0.3.0-mac.zip --target main --title "Lemon - Mac 0.3.0" --notes-file notes.md
+   gh release create mac-v0.4.0 dist/MacOS/Lemon-0.4.0-mac.zip --target main --title "Lemon - Mac 0.4.0" --notes-file notes.md
    ```
 
 4. **Mac only:** update the Homebrew cask in [Kataruna/homebrew-tap](https://github.com/Kataruna/homebrew-tap): set `version` and `sha256` (`shasum -a 256 dist/MacOS/Lemon-X.Y.Z-mac.zip`) in `Casks/lemon.rb`, run `brew audit --cask --strict kataruna/tap/lemon`, and push.

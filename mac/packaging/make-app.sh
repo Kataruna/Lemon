@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" <<'PL'
 <key>CFBundleIconFile</key><string>Lemon</string>
 <key>CFBundleIconName</key><string>Lemon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.3.0</string>
+<key>CFBundleShortVersionString</key><string>0.4.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>CFBundleDocumentTypes</key><array><dict>
