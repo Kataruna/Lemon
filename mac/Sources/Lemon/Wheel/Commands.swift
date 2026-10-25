@@ -32,14 +32,30 @@ enum Token: String, CaseIterable {
     static func offered(_ on: RunsOn) -> [Token] { [.files: [.file], .folders: [.folder, .files], .links: [.link]][on]! }
 }
 
+/// A command line split into plain text and placeholders, in order. Unknown {…} stays text.
+func tokenize(_ line: String) -> [(text: String, token: Token?)] {
+    var out: [(String, Token?)] = [], rest = Substring(line), plain = ""
+    while let open = rest.firstIndex(of: "{") {
+        plain += rest[..<open]
+        if let close = rest[open...].firstIndex(of: "}"), let t = Token.named(String(rest[open...close])) {
+            if !plain.isEmpty { out.append((plain, nil)); plain = "" }
+            out.append((t.text, t))
+            rest = rest[rest.index(after: close)...]
+        } else { plain += "{"; rest = rest[rest.index(after: open)...] }
+    }
+    plain += rest
+    if !plain.isEmpty { out.append((plain, nil)) }
+    return out
+}
+
 private func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'" }
 
 /// `line` with each placeholder replaced by `value` (a path or link) and {files} by `files`, all single-quoted so
-/// spaces, quotes and `$` arrive unchanged.
+/// spaces, quotes and `$` arrive unchanged. One pass: a name with "{folder}" in it isn't replaced again.
 func commandLine(_ line: String, _ value: String, files: [String] = []) -> String {
-    var out = line.replacingOccurrences(of: Token.files.text, with: files.map(quote).joined(separator: " "))
-    for t in ["{path}", "{url}", Token.file.text, Token.folder.text, Token.link.text] { out = out.replacingOccurrences(of: t, with: quote(value)) }
-    return out
+    tokenize(line).map { piece in
+        switch piece.token { case nil: piece.text; case .files: files.map(quote).joined(separator: " "); default: quote(value) }
+    }.joined()
 }
 
 /// The files directly inside a folder, by name, without hidden ones or subfolders.

@@ -463,7 +463,8 @@ final class WheelHost: NSHostingView<WheelView> {
     /// Takes whatever the source allows: insisting on .copy makes macOS refuse drops from apps that only offer move.
     private func operation(_ s: NSDraggingInfo) -> NSDragOperation {
         model.hover(at: point(s))
-        guard model.hovered != nil || (model.lemonHot && !model.centerBack) else { return [] }
+        // A link has nothing to queue, so the lemon takes no links.
+        guard model.hovered != nil || (model.lemonHot && !model.centerBack && model.links.isEmpty) else { return [] }
         let m = s.draggingSourceOperationMask
         return [.copy, .generic, .move, .link].first { m.contains($0) } ?? .copy
     }

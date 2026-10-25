@@ -78,3 +78,14 @@ final class CommandTokenTests: XCTestCase {
         XCTAssertTrue(m.modes.isEmpty)
     }
 }
+
+final class CommandOnePassTests: XCTestCase {
+    func testNamesWithPlaceholdersStayQuoted() throws {
+        let p = Process(), out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        p.arguments = ["-c", commandLine("printf '%s|' {folder} {files}", "/x/{link}'a", files: ["/x/{folder}$b"])]
+        p.standardOutput = out
+        try p.run(); p.waitUntilExit()
+        XCTAssertEqual(String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self), "/x/{link}'a|/x/{folder}$b|")
+    }
+}

@@ -24,18 +24,9 @@ final class ChipAttachment: NSTextAttachment {
 /// A command line with each placeholder ({folder}, {link}…) as a chip. Inverse of `chipText`.
 func chipString(_ line: String, font: NSFont) -> NSAttributedString {
     let out = NSMutableAttributedString(), plain: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.textColor]
-    var rest = Substring(line)
-    while let open = rest.firstIndex(of: "{") {
-        if let close = rest[open...].firstIndex(of: "}"), let t = Token.named(String(rest[open...close])) {
-            out.append(NSAttributedString(string: String(rest[..<open]), attributes: plain))
-            out.append(NSAttributedString(attachment: ChipAttachment(t, font: font)))
-            rest = rest[rest.index(after: close)...]
-        } else {
-            out.append(NSAttributedString(string: String(rest[...open]), attributes: plain))
-            rest = rest[rest.index(after: open)...]
-        }
+    for piece in tokenize(line) {
+        out.append(piece.token.map { NSAttributedString(attachment: ChipAttachment($0, font: font)) } ?? NSAttributedString(string: piece.text, attributes: plain))
     }
-    out.append(NSAttributedString(string: String(rest), attributes: plain))
     return out
 }
 
@@ -97,6 +88,8 @@ struct ChipField: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
+        // SwiftUI makes a new editor struct (and control) on redraws: keep the buttons pointed at this text view.
+        control.view = scroll.documentView as? NSTextView
         guard let tv = scroll.documentView as? NSTextView, let s = tv.textStorage, chipText(s) != text else { return }
         s.setAttributedString(chipString(text, font: ChipFieldControl.font))
     }
@@ -110,7 +103,8 @@ struct ChipField: NSViewRepresentable {
             // A placeholder typed or pasted as text: show it as a chip, with the cursor after the same text as before.
             if rebuilt.length != s.length {
                 let before = chipText(s.attributedSubstring(from: NSRange(location: 0, length: tv.selectedRange().location)))
-                s.setAttributedString(rebuilt)
+                // Through the text view, not the storage, so Undo knows about it.
+                tv.insertText(rebuilt, replacementRange: NSRange(location: 0, length: s.length))
                 tv.setSelectedRange(NSRange(location: chipString(before, font: ChipFieldControl.font).length, length: 0))
             }
             tv.typingAttributes = [.font: ChipFieldControl.font, .foregroundColor: NSColor.textColor]
