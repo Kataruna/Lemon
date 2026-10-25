@@ -7,7 +7,8 @@
     Background="Transparent">
 
     <Page.Resources>
-        <!-- One 6-second loop. Times: pick up 0.3, travel to 1.5, shake 1.6–2.3, wheel opens 2.5, onto JPG 3.3, let go 3.6, new file 4.2. -->
+        <!-- One 6-second loop. Times: pick up 0.3, travel to 1.5, shake 1.6–2.3, wheel opens 2.5, onto JPG 3.3, let go 3.6, new file 4.2.
+             The code aims the pointer (AimX, AimY) at the JPG slice of the user's own wheel. -->
         <Storyboard x:Name="WheelDemo" RepeatBehavior="Forever" Duration="0:0:6">
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Dragged" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
@@ -19,13 +20,15 @@
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
                 <DiscreteDoubleKeyFrame KeyTime="0:0:0.4" Value="0" />
                 <SplineDoubleKeyFrame KeyTime="0:0:1.5" Value="280" KeySpline="0.4,0 0.2,1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:2.7" Value="280" />
+                <SplineDoubleKeyFrame x:Name="AimX" KeyTime="0:0:3.3" Value="280" KeySpline="0.4,0 0.2,1" />
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="DragMove" Storyboard.TargetProperty="TranslateY">
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
                 <DiscreteDoubleKeyFrame KeyTime="0:0:0.4" Value="0" />
                 <SplineDoubleKeyFrame KeyTime="0:0:1.5" Value="10" KeySpline="0.4,0 0.2,1" />
                 <DiscreteDoubleKeyFrame KeyTime="0:0:2.7" Value="10" />
-                <SplineDoubleKeyFrame KeyTime="0:0:3.3" Value="-55" KeySpline="0.4,0 0.2,1" />
+                <SplineDoubleKeyFrame x:Name="AimY" KeyTime="0:0:3.3" Value="-48" KeySpline="0.4,0 0.2,1" />
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames x:Name="ShakeAnimation" Storyboard.TargetName="DragShake" Storyboard.TargetProperty="TranslateX">
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
@@ -65,7 +68,13 @@
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="LitSlice" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
                 <DiscreteDoubleKeyFrame KeyTime="0:0:3.1" Value="0" />
-                <LinearDoubleKeyFrame KeyTime="0:0:3.25" Value="0.35" />
+                <LinearDoubleKeyFrame KeyTime="0:0:3.25" Value="1" />
+            </DoubleAnimationUsingKeyFrames>
+            <!-- The glass is see-through, so the unlit wheel fades out as the lit one fades in -->
+            <DoubleAnimationUsingKeyFrames Storyboard.TargetName="WheelDrawing" Storyboard.TargetProperty="Opacity">
+                <DiscreteDoubleKeyFrame KeyTime="0" Value="1" />
+                <DiscreteDoubleKeyFrame KeyTime="0:0:3.1" Value="1" />
+                <LinearDoubleKeyFrame KeyTime="0:0:3.25" Value="0" />
             </DoubleAnimationUsingKeyFrames>
             <DoubleAnimationUsingKeyFrames Storyboard.TargetName="ResultFile" Storyboard.TargetProperty="Opacity">
                 <DiscreteDoubleKeyFrame KeyTime="0" Value="0" />
@@ -168,14 +177,14 @@
                             <!-- The file in its folder, and the converted copy that appears next to it -->
                             <Border x:Name="OriginalFile" Canvas.Left="40" Canvas.Top="100" Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0">
                                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE91B;" FontSize="16" />
+                                    <Image x:Name="OriginalIcon" Width="20" Height="20" />
                                     <TextBlock Text="Photo.heic" />
                                 </StackPanel>
                             </Border>
                             <Border x:Name="ResultFile" Canvas.Left="40" Canvas.Top="150" Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0" Opacity="0">
                                 <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <FontIcon Glyph="&#xE73E;" FontSize="16" Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
-                                    <TextBlock Text="Photo.jpg" />
+                                    <Image x:Name="ResultIcon" Width="20" Height="20" />
+                                    <TextBlock x:Name="ResultName" Text="Photo.jpg" />
                                 </StackPanel>
                             </Border>
 
@@ -184,17 +193,13 @@
                                 <Grid.RenderTransform>
                                     <ScaleTransform x:Name="WheelScale" ScaleX="0.6" ScaleY="0.6" />
                                 </Grid.RenderTransform>
-                                <Ellipse Fill="{ThemeResource CardBackgroundFillColorDefaultBrush}" Stroke="{ThemeResource AccentFillColorDefaultBrush}" StrokeThickness="3" />
-                                <Path x:Name="LitSlice" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0"
-                                      Data="M27.8,27.8 A88,88 0 0 1 152.2,27.8 L114.7,65.3 A35,35 0 0 0 65.3,65.3 Z" />
-                                <Line X1="27" Y1="27" X2="153" Y2="153" Stroke="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                                <Line X1="153" Y1="27" X2="27" Y2="153" Stroke="{ThemeResource DividerStrokeColorDefaultBrush}" />
-                                <TextBlock Text="JPG" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,22,0,0" />
-                                <TextBlock Text="PNG" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,16,0" />
-                                <TextBlock Text="WEBP" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,22" />
-                                <TextBlock Text="PDF" FontWeight="SemiBold" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="18,0,0,0" />
-                                <Ellipse Width="70" Height="70" Fill="{ThemeResource CardBackgroundFillColorDefaultBrush}" Stroke="{ThemeResource CardStrokeColorDefaultBrush}" />
-                                <Image Source="ms-appx:///Assets/Lemon.png" Width="32" Height="32" />
+                                <!-- The user's own wheel (drawn in code), and the same wheel with the JPG slice lit, which fades in on the hover -->
+                                <Viewbox>
+                                    <Grid>
+                                        <Border x:Name="WheelDrawing" />
+                                        <Border x:Name="LitSlice" Opacity="0" />
+                                    </Grid>
+                                </Viewbox>
                             </Grid>
 
                             <Border x:Name="KeyCap" Canvas.Left="400" Canvas.Top="150" Padding="10,4" CornerRadius="6" Opacity="0"
@@ -211,9 +216,9 @@
                                     <Grid.RenderTransform>
                                         <CompositeTransform x:Name="DragShake" />
                                     </Grid.RenderTransform>
-                                    <Border Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0" Opacity="0.75">
+                                    <Border Width="130" Height="40" Style="{StaticResource CardStyle}" Padding="10,0" Opacity="0.6">
                                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                            <FontIcon Glyph="&#xE91B;" FontSize="16" />
+                                            <Image x:Name="DraggedIcon" Width="20" Height="20" />
                                             <TextBlock Text="Photo.heic" />
                                         </StackPanel>
                                     </Border>

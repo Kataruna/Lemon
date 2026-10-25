@@ -15,12 +15,13 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **To do** | **Done** (the original) |
+| **Done** | **Done** (the original) |
 
 - Commands can run on **Files** too (*Runs on: Files · Folders · Links*), with optional file types (`pdf, png`; empty means any). They run once per matching dragged file, in its folder. A file command also opens the wheel for files Lemon can't convert. Files still open on their usual ring.
 - Placeholders are `{file}`, `{folder}`, `{files}` (the files directly inside the folder, sorted, no hidden ones, each quoted, one run per folder) and `{link}`. `{path}` / `{url}` still work.
 - The command box shows each placeholder as a colored chip (File blue, Folder orange, Files in Folder purple, Link green), with buttons under it to insert the ones that fit *Runs on* at the cursor. Copy and paste carry the `{…}` text, and typed placeholders turn into chips. Smart quotes and dashes are off in the box.
 - Mac files: `Wheel/Commands.swift` (`RunsOn`, `Token`, `WheelCommand.on/takes`), `Settings/ChipField.swift`, `Wheel/Wheel.swift` (`WheelModel.targets`), `Settings/Customize.swift` (`CommandEditor`). Saved commands from the first version (`forLinks`) still decode.
+- Windows files: `Lemon.Core/Wheel/Commands.cs` (`RunsOn`, `WheelCommand.Takes`, `CommandToken`, `CommandLine.Tokenize/Build`), `Lemon.App/Views/CommandEditor.cs` (dialog and chip box), `Wheel/WheelWindow.xaml.cs` (`Targets`). Came out different: a chip is the `{file}` text itself, colored and bold in a RichEditBox, not a capsule with the name, and it deletes one character at a time. Undo can take the coloring off a chip until the next edit. `{files}` becomes a PowerShell list (`'a', 'b'`) so cmdlets get one array; programs still get separate arguments. Windows never had `forLinks`, so there's nothing old to decode.
 
 ---
 
@@ -28,13 +29,14 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **To do** | **Done** (the original) |
+| **Done** | **Done** (the original) |
 
 - *Settings › Wheel › Commands*: the user's own shell lines, each with a name, an icon, *Folders* or *Links*, and the line. Up to 8 of each kind go on a **Commands** ring, in Settings order. Not one of the hideable built-in rings, and not offered in *Opens on*. No commands means no ring.
 - Dropping on one runs the line once per dragged item, in a login shell, without waiting. `{path}` / `{url}` become the item, single-quoted for the shell. A non-zero exit or launch error shows an alert with the command's name and the end of its stderr.
 - A drag of only folders opens on Commands, even with nothing convertible inside. With a link command set up, a drag with an http(s) link counts as a link (even if the browser also adds a file) and gets only the Commands ring. Dropping a link on the lemon does nothing.
 - Mac files: `mac/Sources/Lemon/Wheel/Commands.swift` (model, `commandLine`, `runCommand`), `Wheel/Wheel.swift` (`WheelMode.commands`, `WheelModel.load(_:folders:links:)`, `WheelController.open/show/pick`), `Settings/Customize.swift` (`CommandEditor`, Commands section), `Conversion/Presets.swift` (`Preset.command`).
-- Windows notes: the wheel already opens for a link drag (it reads the data after it opens), but `WheelWindow` only reads `StorageItems`, so a link drop is ignored. Read `StandardDataFormats.WebLink` / `Uri` there. Folder paths come through `GetStorageItemsAsync` already. Run with `cmd /c` or PowerShell, quoting for that shell.
+- Windows files: `Lemon.Core/Wheel/Commands.cs`, `Wheel/ConversionWheel.cs` (`WheelRing.Commands`, `Plan(..., commands, onCommands)`), `Presets/Preset.cs` (`CommandId`), `Lemon.App/Wheel/CommandRunner.cs`, `Wheel/WheelWindow.xaml.cs` (link reading, command drops), `Views/WheelSettingsPage` (Commands card).
+- Came out different on Windows: lines run in Windows PowerShell 5.1 (`powershell.exe -File` on a temp script, no window), and placeholders are single-quoted for PowerShell. There's no login shell. A failure shows a Windows notification from the tray icon, with the last 200 characters of stderr, instead of an alert. A link is read from `WebLink`, or from dragged text that is an http(s) link.
 
 ---
 
@@ -42,9 +44,10 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **To do** | **Done** (the original) |
+| **Done** | **Done** (the original) |
 
 - The welcome guide's step 2 draws the actual wheel instead of a fixed JPG / PNG / WEBP / PDF drawing: the user's Convert ring for pictures (up to 8 formats, Settings order) in their theme and glass. The photo is dropped on the JPG wedge (the first wedge if JPG isn't on the ring), which lights up as in a real drag, and the new file is named with that format. The files are drawn with the system's own icons, and the dragged copy is see-through with a pointer on it.
 - The empty main window ("Or shake or hold Shift while dragging files anywhere for the wheel") and the menu bar menu describe how the wheel opens right now: shaking, the key, or both, with the key's name.
 - Mac files: `mac/Sources/Lemon/App/Welcome.swift` (`WheelDemo`), `Wheel/Wheel.swift` (`WheelModel.load(demo:)`), `Settings/Customize.swift` (`Prefs.summon`), `App/LemonApp.swift` (`MenuHint`).
-- Windows notes: `WelcomePage.xaml` draws its own wheel; reusing `WheelPreview` (as Settings › Wheel does) would match the real one.
+- Windows files: `Views/WelcomePage.xaml(.cs)` (`ShowDemoWheel`, `ShowFileIcons`), `Views/WheelPreview.cs` (`RenderDemo`), `App.xaml.cs` (`WheelHint`, the tray tooltip), `Views/ConvertPage.xaml` (the empty queue's hint).
+- Came out different on Windows: the demo disc has the theme's tint but no blur behind it, since there's nothing behind it on the page to blur. The hint goes in the tray icon's tooltip, because Windows has no menu bar menu. The file icons come from empty stand-in files in the temp folder.

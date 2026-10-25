@@ -77,6 +77,19 @@
                 </StackPanel>
             </Border>
 
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Commands" Margin="0,12,0,0" />
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="8">
+                    <StackPanel x:Name="CommandsPanel" Spacing="4" />
+                    <Button Content="New command…" Click="OnNewCommand" />
+                    <TextBlock
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap"
+                        Text="Your own PowerShell commands for dragged files, folders and links, on a Commands ring. A folder dragged on its own opens on it. Up to 8 of each." />
+                </StackPanel>
+            </Border>
+
             <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Opens on" Margin="0,12,0,0" />
             <Border Style="{StaticResource CardStyle}">
                 <StackPanel Spacing="8">

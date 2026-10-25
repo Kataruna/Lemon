@@ -22,7 +22,7 @@ internal sealed unsafe partial class TrayIcon : IDisposable
     private readonly uint _taskbarCreated;
     private readonly nint _hwnd;
     private readonly nint _icon;
-    private readonly string _tooltip;
+    private string _tooltip;
     private readonly string _iconPath;
     /// <summary>Progress ring icons by step, drawn once each and kept for later batches.</summary>
     private readonly Dictionary<int, nint> _rings = [];
@@ -62,6 +62,17 @@ internal sealed unsafe partial class TrayIcon : IDisposable
         _taskbarCreated = RegisterWindowMessageW("TaskbarCreated");
         _icon = _shownIcon = LoadImageW(0, iconPath, 1 /* IMAGE_ICON */, GetSystemMetrics(49), GetSystemMetrics(50), 0x10 /* LR_LOADFROMFILE */);
         AddIcon();
+    }
+
+    /// <summary>The tooltip while nothing is converting.</summary>
+    public string Tooltip
+    {
+        set
+        {
+            _tooltip = value;
+            if (_shownIcon == _icon)
+                SetProgress(null, null);
+        }
     }
 
     /// <summary>

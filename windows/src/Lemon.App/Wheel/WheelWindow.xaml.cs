@@ -73,6 +73,8 @@ public sealed partial class WheelWindow : Window
     private WheelLook _look = null!;
 
     private IReadOnlyList<string>? _paths;
+    /// <summary>The dragged files (not what's inside folders), folders and web links, for the Commands ring.</summary>
+    private List<string> _files = [], _folders = [], _links = [];
     private Task? _loading;
     private IReadOnlyList<Preset> _choices = [];
     /// <summary>The rings for the dragged files and their presets, once the files are known.</summary>
@@ -160,6 +162,7 @@ public sealed partial class WheelWindow : Window
         StopOpenAnimation();
         _closing = false;
         _paths = null;
+        _files = _folders = _links = [];
         _loading = null;
         // Pick up tools installed while Lemon sat in the tray.
         App.Conversion.RefreshTools();
@@ -296,18 +299,49 @@ public sealed partial class WheelWindow : Window
     /// </summary>
     private void StartLoading(DragEventArgs e)
     {
-        if (_loading is null && e.DataView.Contains(StandardDataFormats.StorageItems))
+        if (_loading is null && Carries(e.DataView))
             _loading = LoadAsync(e);
     }
+
+    /// <summary>Files, or (with a command for links) something that may be a web link.</summary>
+    private static bool Carries(DataPackageView data) =>
+        data.Contains(StandardDataFormats.StorageItems) || (HasLinkCommand
+            && (data.Contains(StandardDataFormats.WebLink) || data.Contains(StandardDataFormats.Text)));
+
+    private static bool HasLinkCommand => App.Settings.Wheel.Commands.Any(c => c.RunsOn == RunsOn.Links);
+
+    /// <summary>The dragged http(s) link, from a browser's link or from dragged text that is one.</summary>
+    private static async Task<string?> LinkAsync(DataPackageView data)
+    {
+        var uri = data.Contains(StandardDataFormats.WebLink) ? await data.GetWebLinkAsync()
+            : data.Contains(StandardDataFormats.Text) && Uri.TryCreate((await data.GetTextAsync()).Trim(), UriKind.Absolute, out var text) ? text
+            : null;
+        return uri?.Scheme is "http" or "https" ? uri.AbsoluteUri : null;
+    }
+
+    /// <summary>The dragged items a command runs on.</summary>
+    private IReadOnlyList<string> Targets(WheelCommand command) => command.RunsOn switch
+    {
+        RunsOn.Files => [.. _files.Where(command.Takes)],
+        RunsOn.Folders => _folders,
+        _ => _links,
+    };
 
     /// <summary>Reads the dragged files before the drop so the wheel can show formats that fit them.</summary>
     private async Task LoadAsync(DragEventArgs e)
     {
         var deferral = e.GetDeferral();
+        List<string> dragged = [];
         try
         {
-            var items = await e.DataView.GetStorageItemsAsync();
-            var dragged = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
+            // A link counts as a link even when the browser adds a file for it, but only with a command for links:
+            // otherwise a drag carrying both still converts its files.
+            if (HasLinkCommand && await LinkAsync(e.DataView) is { } link)
+                _links = [link];
+            else if (e.DataView.Contains(StandardDataFormats.StorageItems))
+                dragged = [.. (await e.DataView.GetStorageItemsAsync()).Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p))];
+            _folders = [.. dragged.Where(Directory.Exists)];
+            _files = [.. dragged.Where(File.Exists)];
             // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread. All of it: these
             // are the files a drop converts, so a cap would silently leave the rest of a big folder out.
             _paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).ToList());
@@ -325,10 +359,12 @@ public sealed partial class WheelWindow : Window
         try
         {
             // Only rings with something for these files, so e.g. PDFs (which can only be optimized) open on Optimize.
-            _plan = Plan(_paths);
+            // Folders on their own open on Commands: a project folder nearly always has something convertible inside.
+            _plan = Plan(_paths, [.. App.Settings.Wheel.Commands.Where(c => Targets(c).Count > 0)], onCommands: _folders.Count > 0 && _folders.Count == dragged.Count);
             _ring = _plan.Start;
             _inHub = _plan.OpensOnHub;
-            _centerText = _paths.Count == 0 ? "Lemon can't convert these"
+            _centerText = !_paths.Any(FormatCatalog.IsSupported) && _plan.Rings.Count > 0 ? "Drop on a command"
+                : _paths.Count == 0 ? "Lemon can't convert these"
                 : _plan.Rings.Count == 0 ? "Mixed file types: add to queue"
                 : "Add to queue";
             ShowSlices(animate: true);
@@ -346,7 +382,7 @@ public sealed partial class WheelWindow : Window
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
-        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        if (!Carries(e.DataView))
             return;
         StartLoading(e);
 
@@ -356,12 +392,13 @@ public sealed partial class WheelWindow : Window
         var usable = _paths is null || _paths.Count > 0;
         // A ring on the hub, or the middle when it leads back there, isn't somewhere to drop, only to rest on.
         var drops = hit != None && !(_inHub && hit >= 0) && !(hit == CenterHit && CenterBack);
-        e.AcceptedOperation = drops && usable ? DataPackageOperation.Copy : DataPackageOperation.None;
+        // A slice takes anything it was offered for; the middle only files it can queue (so no links).
+        e.AcceptedOperation = drops && (usable || hit >= 0) ? Operation(e.AllowedOperations) : DataPackageOperation.None;
         e.DragUIOverride.IsGlyphVisible = false;
         e.DragUIOverride.Caption = hit switch
         {
             >= 0 when _inHub && hit < _plan.Rings.Count => "Hold here for " + _plan.Rings[hit].Name,
-            >= 0 when hit < _choices.Count => (_plan.Rings[_ring].Page == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
+            >= 0 when hit < _choices.Count => (_choices[hit].CommandId is not null ? "Run " : _plan.Rings[_ring].Page == WheelPage.Convert ? "Convert to " : "") + _choices[hit].Name,
             <= ChipHit when _chips.ElementAtOrDefault(ChipHit - hit) is var target && (target == HubTarget || target != _ring) =>
                 "Hold here for " + (target == HubTarget ? "all rings" : _plan.Rings[target].Name),
             CenterHit when CenterBack => "Hold here for all rings",
@@ -387,6 +424,33 @@ public sealed partial class WheelWindow : Window
         StartLoading(e);
         if (_loading is not null)
             await _loading;
+        // Loading may have put up a different ring, with fewer slices.
+        if (hit >= _choices.Count)
+            hit = CenterHit;
+        if (hit >= 0 && _choices[hit].CommandId is { } id)
+        {
+            if (App.Settings.Wheel.Commands.FirstOrDefault(c => c.Id == id) is { } command)
+            {
+                // Off the UI thread: one PowerShell per item, and listing a big folder for {files}, would stall the wheel.
+                var targets = Targets(command);
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        CommandRunner.Run(command, targets);
+                    }
+                    catch (Exception ex)
+                    {
+                        ErrorLog.Write("Running a command", ex);
+                    }
+                });
+            }
+            Celebrate(hit);
+            SetHub("Running " + _choices[hit].Name, icon: "");
+            ScaleFrom(_hubIcon, Vector3.Zero, Vector3.One, damping: 0.4f);
+            HideAfter(TimeSpan.FromMilliseconds(950));
+            return;
+        }
         if (_paths is not { Count: > 0 } paths)
         {
             Hide();
@@ -422,11 +486,11 @@ public sealed partial class WheelWindow : Window
         }
     }
 
-    private static WheelPlan Plan(IReadOnlyList<string> paths)
+    private static WheelPlan Plan(IReadOnlyList<string> paths, IReadOnlyList<WheelCommand> commands, bool onCommands)
     {
         var supported = paths.Where(FormatCatalog.IsSupported).ToList();
         if (supported.Count == 0)
-            return WheelPlan.Empty;
+            return commands.Count == 0 ? WheelPlan.Empty : ConversionWheel.Plan([], MediaKind.Image, App.Settings.Wheel, commands);
 
         // Presets depend only on the file type, so check one file per extension.
         var perType = supported
@@ -434,7 +498,7 @@ public sealed partial class WheelWindow : Window
             .Select(g => (FormatCatalog.KindOf(g.Key)!.Value, App.Queue.PresetsFor(g.First())))
             .ToList();
         var kind = supported.GroupBy(p => FormatCatalog.KindOf(p)!.Value).MaxBy(g => g.Count())!.Key;
-        return ConversionWheel.Plan(perType, kind, App.Settings.Wheel);
+        return ConversionWheel.Plan(perType, kind, App.Settings.Wheel, commands, onCommands);
     }
 
     // ---- Hover and celebration ----
@@ -931,7 +995,7 @@ public sealed partial class WheelWindow : Window
         _choices = _inHub || _plan.Rings.Count == 0 ? [] : _plan.Choices[_ring];
         var labels = _inHub
             ? _plan.Rings.Select(r => (r.Name, (string?)r.Detail, (string?)r.Glyph)).ToList()
-            : _choices.Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, (string?)null) : default).ToList();
+            : _choices.Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, CommandGlyph(p)) : default).ToList();
 
         foreach (var slice in _slices)
         {
@@ -1006,6 +1070,19 @@ public sealed partial class WheelWindow : Window
             }
         }
     }
+
+    /// <summary>A command's icon, for its slice on the Commands ring.</summary>
+    internal static string? CommandGlyph(Preset preset) =>
+        preset.CommandId is { } id ? App.Settings.Wheel.Commands.FirstOrDefault(c => c.Id == id)?.Glyph : null;
+
+    /// <summary>
+    /// Copy when the source allows it (Explorer, most apps); a browser's link may only offer Link. Never Move, which
+    /// would tell the source to delete the original.
+    /// </summary>
+    private static DataPackageOperation Operation(DataPackageOperation allowed) =>
+        allowed.HasFlag(DataPackageOperation.Copy) || allowed == DataPackageOperation.None ? DataPackageOperation.Copy
+        : allowed.HasFlag(DataPackageOperation.Link) ? DataPackageOperation.Link
+        : DataPackageOperation.None;
 
     /// <summary>A ring slice between two angles (degrees, 0 = right, clockwise), drawn as fine polylines.</summary>
     internal static PathGeometry Sector(double fromDegrees, double toDegrees)

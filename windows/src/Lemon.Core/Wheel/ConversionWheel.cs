@@ -14,6 +14,9 @@ public enum WheelPage
 /// <param name="Detail">One line about the ring, for its slice on the hub.</param>
 public sealed record WheelRing(string Id, string Name, string Glyph, string Detail, WheelPage? Page, IReadOnlyList<string>? PresetIds = null)
 {
+    /// <summary>The user's commands. Not one of the built-ins Settings can hide: no commands, no ring.</summary>
+    public static readonly WheelRing Commands = new("commands", "Commands", "", "Your commands", null, []);
+
     public static readonly IReadOnlyList<WheelRing> BuiltIns =
     [
         new("convert", "Convert", "\uE8AB", "Change format", WheelPage.Convert),
@@ -133,8 +136,11 @@ public static class ConversionWheel
     /// was), or the hub when asked for or when the chosen ring has nothing for these files. With more rings than
     /// fit on the mode bar, the hub is how to switch.
     /// </summary>
+    /// <param name="commands">The commands that have something to run on in this drag; up to 8 go on a Commands ring, last.</param>
+    /// <param name="onCommands">Open on the Commands ring (a drag of only folders).</param>
     public static WheelPlan Plan(
-        IReadOnlyList<(MediaKind Kind, IReadOnlyList<Preset> Presets)> availablePerFileType, MediaKind kind, WheelSettings settings)
+        IReadOnlyList<(MediaKind Kind, IReadOnlyList<Preset> Presets)> availablePerFileType, MediaKind kind, WheelSettings settings,
+        IReadOnlyList<WheelCommand>? commands = null, bool onCommands = false)
     {
         var convertRing = settings.ConvertRing.GetValueOrDefault(kind);
         var rings = new List<WheelRing>();
@@ -147,8 +153,14 @@ public static class ConversionWheel
             rings.Add(ring);
             choices.Add(presets);
         }
+        if (commands is { Count: > 0 })
+        {
+            rings.Add(WheelRing.Commands);
+            choices.Add(commands.Take(MaxChoices).Select(c => new Preset { Name = c.Name, TargetExtension = "", CommandId = c.Id }).ToList());
+        }
 
-        var start = settings.OpenOnHub ? "hub" : settings.OpensOn.GetValueOrDefault(kind);
+        var start = onCommands && commands is { Count: > 0 } ? WheelRing.Commands.Id
+            : settings.OpenOnHub ? "hub" : settings.OpensOn.GetValueOrDefault(kind);
         var index = rings.FindIndex(r => r.Id == start);
         var hubOn = rings.Count > 1 && (start == "hub" || rings.Count > MaxBarRings);
         return new WheelPlan(rings, choices, Math.Max(0, index), hubOn, hubOn && index < 0 && start is not null);
@@ -159,6 +171,9 @@ public static class ConversionWheel
     /// </summary>
     public static (string Title, string? Detail) Label(Preset preset)
     {
+        if (preset.CommandId is not null)
+            return (preset.Name, null);
+
         if (preset.IsOptimize)
         {
             return preset.OptimizeStrength switch

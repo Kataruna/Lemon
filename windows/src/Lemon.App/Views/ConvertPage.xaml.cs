@@ -11,6 +11,8 @@ public sealed partial class ConvertPage : Page
     public ConvertPage()
     {
         InitializeComponent();
+        // Says how the wheel opens right now, which Settings may have changed since last time.
+        Loaded += (_, _) => WheelHintText.Text = $"Or {App.WheelHint} while dragging files anywhere for the wheel.";
     }
 
     public QueueViewModel Queue => App.Queue;

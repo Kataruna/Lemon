@@ -42,6 +42,10 @@ public sealed record Preset
     /// <summary>Set for Remove background presets (which write PNG): the AI model that cuts the subject out.</summary>
     public BackgroundModel? RemoveBackground { get; init; }
 
+    /// <summary>Set on the Commands ring's slices: the <see cref="Wheel.WheelCommand.Id"/> a drop there runs.</summary>
+    [JsonIgnore]
+    public string? CommandId { get; init; }
+
     /// <summary>Only for Optimize presets.</summary>
     public OptimizeStrength OptimizeStrength { get; init; } = OptimizeStrength.Balanced;
 

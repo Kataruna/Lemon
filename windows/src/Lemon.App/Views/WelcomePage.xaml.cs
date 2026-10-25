@@ -2,7 +2,10 @@
 using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using Windows.Storage;
+using Windows.Storage.FileProperties;
 using Windows.System;
 using Windows.UI.ViewManagement;
 
@@ -19,7 +22,57 @@ public sealed partial class WelcomePage : Page
         InitializeComponent();
         ToolList.ItemsSource = ToolStatus.CheckAll();
         ShowSummonText();
+        ShowDemoWheel();
         ShowStep(0);
+    }
+
+    /// <summary>
+    /// The user's own Convert ring for pictures, in their theme, with the drag aimed at its JPG slice (the first slice
+    /// if JPG isn't on it); the new file takes that format's name.
+    /// </summary>
+    private void ShowDemoWheel()
+    {
+        var ring = ConversionWheel.Choose([App.Queue.PresetsFor("Photo.heic")], MediaKind.Image, WheelRing.BuiltIns[0],
+            App.Settings.Wheel.ConvertRing.GetValueOrDefault(MediaKind.Image));
+        var lit = Math.Max(0, ring.ToList().FindIndex(p => p.TargetExtension == "jpg"));
+        WheelDrawing.Child = WheelPreview.RenderDemo(ring, lit: -1);
+        LitSlice.Child = WheelPreview.RenderDemo(ring, lit);
+        var extension = ring.Count > 0 ? FormatCatalog.NormalizeExtension(ring[lit].TargetExtension) : "jpg";
+        ResultName.Text = "Photo." + extension;
+        ShowFileIcons(extension);
+
+        // The 180-wide wheel is the real one scaled down, centered where the pointer stops (280, 10 from where it starts).
+        var angle = (lit * 360.0 / Math.Max(1, ring.Count) - 90) * Math.PI / 180;
+        var radius = (WheelWindow.InnerRadius + WheelWindow.OuterRadius) / 2 * 180 / WheelWindow.Diameter;
+        AimX.Value = 280 + radius * Math.Cos(angle);
+        AimY.Value = 10 + radius * Math.Sin(angle);
+    }
+
+    /// <summary>The files in the demo get the icons Windows shows for them, from empty stand-ins in the temp folder.</summary>
+    private async void ShowFileIcons(string resultExtension)
+    {
+        try
+        {
+            var folder = Directory.CreateDirectory(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Lemon", "Icons")).FullName;
+            OriginalIcon.Source = DraggedIcon.Source = await IconAsync(folder, "heic");
+            ResultIcon.Source = await IconAsync(folder, resultExtension);
+        }
+        catch (Exception ex)
+        {
+            ErrorLog.Write("Drawing the welcome guide's file icons", ex);
+        }
+    }
+
+    private static async Task<BitmapImage> IconAsync(string folder, string extension)
+    {
+        var path = System.IO.Path.Combine(folder, "Photo." + extension);
+        if (!File.Exists(path))
+            await File.WriteAllBytesAsync(path, []);
+        var file = await StorageFile.GetFileFromPathAsync(path);
+        using var icon = await file.GetThumbnailAsync(ThumbnailMode.ListView, 32, ThumbnailOptions.UseCurrentScale);
+        var image = new BitmapImage();
+        await image.SetSourceAsync(icon);
+        return image;
     }
 
     /// <summary>Leaving the guide any way at all (Skip, a button, a tab) counts as having seen it.</summary>
@@ -49,7 +102,8 @@ public sealed partial class WelcomePage : Page
         else
         {
             // Animations off in Windows: a still of the open wheel and the new file instead.
-            Wheel.Opacity = ResultFile.Opacity = 1;
+            Wheel.Opacity = ResultFile.Opacity = LitSlice.Opacity = 1;
+            WheelDrawing.Opacity = 0;
             WheelScale.ScaleX = WheelScale.ScaleY = 1;
         }
         BackButton.Visibility = CustomizeButton.Visibility = FinishButton.Visibility = WheelStep.Visibility;

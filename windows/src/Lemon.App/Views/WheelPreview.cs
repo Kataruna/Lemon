@@ -21,29 +21,39 @@ internal static class WheelPreview
     /// <summary>The sample background, sharp and per blur level, made once.</summary>
     private static readonly Dictionary<int, MagickImage> Backgrounds = [];
 
-    public static FrameworkElement Render(MediaKind kind, string sample)
+    public static FrameworkElement Render(MediaKind kind, string sample) =>
+        Draw(ConversionWheel.Plan([(kind, App.Queue.PresetsFor(sample))], kind, App.Settings.Wheel), lit: 0, backdrop: true);
+
+    /// <summary>
+    /// Just the disc with these presets on the Convert ring, as the welcome guide's demo shows it: no sample background
+    /// or mode bar, and <paramref name="lit"/> (or no slice, for -1) lit as under a drag.
+    /// </summary>
+    public static FrameworkElement RenderDemo(IReadOnlyList<Preset> presets, int lit) =>
+        Draw(new WheelPlan([WheelRing.BuiltIns[0]], [presets], 0, HubOn: false, OpensOnHub: false), lit, backdrop: false);
+
+    private static FrameworkElement Draw(WheelPlan plan, int lit, bool backdrop)
     {
         var settings = App.Settings.Wheel;
         var look = WheelLook.Current;
-        var plan = ConversionWheel.Plan([(kind, App.Queue.PresetsFor(sample))], kind, settings);
         var inHub = plan.OpensOnHub;
         var labels = inHub
             ? plan.Rings.Select(r => (r.Name, (string?)r.Detail, (string?)r.Glyph)).ToList()
             : plan.Rings.Count == 0 ? []
-            : plan.Choices[plan.Start].Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, (string?)null) : default).ToList();
+            : plan.Choices[plan.Start].Select(p => ConversionWheel.Label(p) is var (title, detail) ? (title, detail, WheelWindow.CommandGlyph(p)) : default).ToList();
         // Inside a ring with the hub on, the middle leads back to it unless a chip under the ring does.
         var centerBack = plan.HubOn && !inHub && !settings.BackChip;
         int[] chips = plan.Rings.Count < 2 || inHub || centerBack ? [] : plan.HubOn ? [-1] : [.. Enumerable.Range(0, plan.Rings.Count)];
         var barWidth = chips.Length * ChipWidth + 2 * BarPadding;
         var barHeight = ChipHeight + 2 * BarPadding;
 
-        var root = new Grid { Width = Diameter, Height = WindowHeight };
-        var canvas = new Canvas { Width = Diameter, Height = WindowHeight };
+        var height = backdrop ? WindowHeight : Diameter;
+        var root = new Grid { Width = Diameter, Height = height };
+        var canvas = new Canvas { Width = Diameter, Height = height };
         root.Children.Add(canvas);
 
         // What's "behind" the wheel, so the opacity and blur settings show.
-        var sharp = Background(0);
-        canvas.Children.Add(new Rectangle { Width = Diameter, Height = WindowHeight, RadiusX = 12, RadiusY = 12, Fill = Glass.Crop(sharp, 0, 0, (int)Diameter, (int)WindowHeight) });
+        if (backdrop)
+            canvas.Children.Add(new Rectangle { Width = Diameter, Height = WindowHeight, RadiusX = 12, RadiusY = 12, Fill = Glass.Crop(Background(0), 0, 0, (int)Diameter, (int)WindowHeight) });
 
         // Glass: the blurred picture under the tinted disc, for the disc and the bar alike.
         void AddGlass(Shape frost, Shape tint, double left, double top, double width, double height)
@@ -56,7 +66,7 @@ internal static class WheelPreview
                 Canvas.SetTop(shape, top);
                 canvas.Children.Add(shape);
             }
-            if (look.Blur > 0)
+            if (look.Blur > 0 && backdrop)
             {
                 frost.Fill = Glass.Crop(Background(look.Blur), (int)left, (int)top, (int)width, (int)height);
                 frost.Opacity = look.GlassOpacity;
@@ -78,16 +88,16 @@ internal static class WheelPreview
         {
             var middle = i * sweep - 90;
             var radians = middle * Math.PI / 180;
-            var lit = i == 0;
+            var on = i == lit;
             canvas.Children.Add(new Path
             {
                 Data = Sector(middle - sweep / 2, middle + sweep / 2),
-                Fill = lit ? look.Highlight : null,
+                Fill = on ? look.Highlight : null,
                 Stroke = Brush("DividerStrokeColorDefaultBrush"),
                 StrokeThickness = 1,
             });
             var (title, detail, glyph) = labels[i];
-            var text = lit ? look.OnAccent : look.Text;
+            var text = on ? look.OnAccent : look.Text;
             var label = new StackPanel { Width = 84 };
             if (glyph is not null)
                 label.Children.Add(new FontIcon { Glyph = glyph, FontSize = 16, Foreground = text, Margin = new Thickness(0, 0, 0, 2) });

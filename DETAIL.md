@@ -5,7 +5,7 @@ A closer look at each part of Lemon. Where Windows and Mac differ, both are desc
 - [The conversion wheel](#the-conversion-wheel)
 - [Rings and the hub](#rings-and-the-hub)
 - [Customizing the wheel](#customizing-the-wheel)
-- [Commands (Mac)](#commands-mac)
+- [Commands](#commands)
 - [The batch queue](#the-batch-queue)
 - [Progress and notifications](#progress-and-notifications)
 - [What converts to what](#what-converts-to-what)
@@ -21,7 +21,7 @@ A closer look at each part of Lemon. Where Windows and Mac differ, both are desc
 
 ## The conversion wheel
 
-Lemon watches the mouse across the whole system. When a drag carries files (not text or a picture from a web page), or on the Mac a folder or link you have [commands](#commands-mac) for, and you **shake the mouse** or use the **wheel key**, a round menu opens centered under the pointer:
+Lemon watches the mouse across the whole system. When a drag carries files (not text or a picture from a web page), or a folder or link you have [commands](#commands) for, and you **shake the mouse** or use the **wheel key**, a round menu opens centered under the pointer:
 
 - **Drop on a format** to convert straight away. The files are saved next to the originals, and a notification reports the result.
 - **Drop on the lemon** in the middle to add the files to the queue and open the window.
@@ -71,16 +71,17 @@ The *Wheel* tab in Settings has a live preview at the top and sets:
 - **Opens on:** the hub for everything, or a ring per kind of file.
 - **Convert ring:** which formats go on it for each kind of file, up to 8, in order.
 
-## Commands (Mac)
+## Commands
 
-The **Commands** ring runs your own shell commands on dragged **files**, **folders** or **links**. Set them up in *Settings › Wheel › Commands*. Each one has a name, an icon, what it runs on (*Files*, optionally only some types such as `pdf, png`; *Folders*; or *Links*) and a command line. Up to 8 go on the ring, in Settings order.
+The **Commands** ring runs your own shell commands (PowerShell on Windows) on dragged **files**, **folders** or **links**. Set them up in *Settings › Wheel › Commands*. Each one has a name, an icon, what it runs on (*Files*, optionally only some types such as `pdf, png`; *Folders*; or *Links*) and a command line. Up to 8 go on the ring, in Settings order.
 
-- In the editor the placeholders are colored chips: **File**, **Folder**, **Files in Folder** (the files directly inside the folder, each as its own argument) and **Link**. The buttons under the box insert one at the cursor; typing `{file}`, `{folder}`, `{files}` or `{link}` turns into a chip too, and copying a chip copies that text. The first version's `{path}` and `{url}` still work. Chips are quoted for the shell already, so don't put quotes around them.
-- The line runs in a login `zsh` (so Homebrew's tools are on `PATH`), once for each item dropped, in that folder (a file's own folder; for a link, your home folder). Lemon doesn't wait for it.
+- In the editor the placeholders are colored chips: **File**, **Folder**, **Files in Folder** (the files directly inside the folder, each as its own argument; on Windows a PowerShell list, so cmdlets get them as one array) and **Link**. The buttons under the box insert one at the cursor; typing `{file}`, `{folder}`, `{files}` or `{link}` turns into a chip too, and copying a chip copies that text. The first version's `{path}` and `{url}` still work. Chips are quoted for the shell already, so don't put quotes around them.
+- On the Mac the line runs in a login `zsh` (so Homebrew's tools are on `PATH`); on Windows in Windows PowerShell, without a window. It runs once for each item dropped, in that folder (a file's own folder; for a link, your home folder). Lemon doesn't wait for it.
+- On Windows the chips show as their colored text (`{file}`), and a link is read from what the browser drags, or from dragged text that is a web address.
 - A file command also opens the wheel for files Lemon can't convert, like `.zip`; files keep opening on their usual ring, with Commands as one more.
 - A folder dragged on its own opens the wheel on Commands, even when there's nothing in it to convert. A folder dragged with files gets Commands as one more ring.
-- A link from a browser opens a wheel with only the Commands ring. With no link commands, a link drag doesn't open the wheel.
-- If a command fails (it stops with an error, or won't start), an alert shows its name and the end of what it printed.
+- A link from a browser opens a wheel with only the Commands ring. With no link commands, a link drag doesn't open the wheel on the Mac; on Windows it opens with nothing to drop on.
+- If a command fails (it stops with an error, or won't start), an alert (a notification on Windows) shows its name and the end of what it printed.
 
 Examples:
 
@@ -94,6 +95,16 @@ Examples:
 | Save for later | Links | `echo {link} >> ~/Desktop/later.txt` |
 
 Ghostty ignores `--working-directory` when it's given `-e`, which is why the examples `cd` into the folder (passed as `$0`) themselves.
+
+On Windows:
+
+| Name | Runs on | Command |
+|---|---|---|
+| Terminal | Folders | `wt -d {folder}` |
+| VS Code | Folders | `code {folder}` |
+| Zip the files | Folders | `Compress-Archive {files} "$HOME\Desktop\files.zip" -Force` |
+| Copy path | Files | `Set-Clipboard {file}` |
+| Save for later | Links | `Add-Content "$HOME\Desktop\later.txt" {link}` |
 
 ## The batch queue
 
@@ -168,7 +179,7 @@ Shown once on first launch (and once to people upgrading to 0.3.0). Skip, any bu
 1. **What do you want to convert?** One card per kind of file: Pictures, Videos and music, Documents and ebooks, Making PDFs, Shrinking PDFs. Each shows **Ready** or **Add**.
    - **Windows:** Add runs `winget install --id <id> --exact` in a visible console window, which stays open on an error; Lemon checks again when it closes. Ghostscript isn't on winget, so its button (*Get it…*) opens the download page. Pictures are always ready.
    - **Mac:** Add opens a Terminal window running `brew install <formula>`, which stays open on an error. Without Homebrew the button is *Get it…* and opens brew.sh. Lemon checks again every 2 s and when it comes back to the front. Pictures need ImageMagick, so they have an Add button too.
-2. **Convert without opening Lemon.** A 6-second loop acts it out: a photo is dragged, shaken (or the wheel key pops up), the wheel opens, the photo is dropped on JPG, and the JPG appears under the original, while *1. Drag · 2. Shake · 3. Drop* light up in turn. On the Mac it's the real wheel with your own Convert ring and theme. With animations off (Windows) or *Reduce motion* (Mac) it's a still picture. Buttons: *Back*, *Customize the wheel*, *Get started*.
+2. **Convert without opening Lemon.** A 6-second loop acts it out: a photo is dragged, shaken (or the wheel key pops up), the wheel opens, the photo is dropped on JPG, and the JPG appears under the original, while *1. Drag · 2. Shake · 3. Drop* light up in turn. It's the real wheel with your own Convert ring and theme (on Windows without the blur). With animations off (Windows) or *Reduce motion* (Mac) it's a still picture. Buttons: *Back*, *Customize the wheel*, *Get started*.
 
 ## Update check
 

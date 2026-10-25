@@ -107,6 +107,10 @@
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Text="Pick Optimize to make images, videos and PDFs smaller in the same format." />
+                <TextBlock
+                    x:Name="WheelHintText"
+                    HorizontalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <Button
                     Margin="0,8,0,0"
                     HorizontalAlignment="Center"

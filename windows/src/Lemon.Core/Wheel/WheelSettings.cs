@@ -32,6 +32,9 @@ public sealed class WheelSettings
 
     public List<CustomRing> Rings { get; set; } = [];
 
+    /// <summary>The user's shell lines for the Commands ring, in Settings order.</summary>
+    public List<WheelCommand> Commands { get; set; } = [];
+
     /// <summary>Every drag opens on the hub, where the rings themselves are the slices.</summary>
     public bool OpenOnHub { get; set; }
 

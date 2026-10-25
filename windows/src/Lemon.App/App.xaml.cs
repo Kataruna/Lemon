@@ -115,10 +115,17 @@ public partial class App : Application
             _ = Windows.System.Launcher.LaunchUriAsync(new Uri(release.Url));
     }
 
+    /// <summary>How the wheel opens right now, e.g. "shake the mouse or press Space".</summary>
+    public static string WheelHint =>
+        Settings.WheelOnShake && Settings.WheelOnKey ? $"shake the mouse or press {Settings.WheelKey}"
+        : Settings.WheelOnKey ? $"press {Settings.WheelKey}"
+        : "shake the mouse";
+
+    /// <summary>A Windows notification from the tray icon about something that went wrong, e.g. a command that failed.</summary>
+    internal static void Notify(string title, string message) => _tray?.ShowNotification(title, message, isError: true);
+
     public static void ApplyWheelSettings()
     {
-        if (_gestures is null)
-            return;
         // Older settings turned the key off by clearing it, and could leave no way to open the wheel at all.
         if (Settings.WheelKey is null)
         {
@@ -127,6 +134,10 @@ public partial class App : Application
         }
         if (!Settings.WheelOnShake && !Settings.WheelOnKey)
             Settings.WheelOnShake = true;
+        if (_tray is not null)
+            _tray.Tooltip = $"Lemon: {WheelHint} while dragging files";
+        if (_gestures is null)
+            return;
         _gestures.ShakeEnabled = Settings.WheelOnShake;
         _gestures.WheelKey = Settings.WheelOnKey && Enum.TryParse<Windows.System.VirtualKey>(Settings.WheelKey, out var key) ? (int)key : 0;
     }
@@ -143,7 +154,7 @@ public partial class App : Application
     {
         var tray = new TrayIcon(
             Path.Combine(AppContext.BaseDirectory, "Assets", "Lemon.ico"),
-            "Lemon: shake the mouse or press the wheel key while dragging files",
+            $"Lemon: {WheelHint} while dragging files",
             () =>
             [
                 new("Open Lemon", ShowQueue, IsDefault: true),

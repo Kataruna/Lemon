@@ -52,6 +52,7 @@ public sealed partial class WheelSettingsPage : Page
         _loading = false;
         LoadLook();
         BuildRings();
+        BuildCommands();
         BuildOpensOn();
         BuildSlots();
         RefreshPreview();
@@ -282,6 +283,57 @@ public sealed partial class WheelSettingsPage : Page
         BuildOpensOn();
     }
 
+    // ---- Commands ----
+
+    private void BuildCommands()
+    {
+        CommandsPanel.Children.Clear();
+        for (var i = 0; i < S.Commands.Count; i++)
+        {
+            var (index, command) = (i, S.Commands[i]);
+            var edit = new Button { Content = "Edit" };
+            edit.Click += async (_, _) => await EditCommandAsync(command);
+            var grid = new Grid { ColumnSpacing = 2, Padding = new Thickness(4, 0, 0, 0) };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (var c = 0; c < 4; c++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.Children.Add(Row(command.Glyph, command.Name, command.RunsOn.ToString()));
+            grid.Children.Add(OrderedList.IconButton("","Move up", 1, index > 0, () => Swap(index - 1)));
+            grid.Children.Add(OrderedList.IconButton("","Move down", 2, index < S.Commands.Count - 1, () => Swap(index)));
+            Grid.SetColumn(edit, 3);
+            grid.Children.Add(edit);
+            grid.Children.Add(OrderedList.IconButton("","Delete command", 4, true, () =>
+            {
+                S.Commands.Remove(command);
+                Changed();
+                BuildCommands();
+            }));
+            CommandsPanel.Children.Add(grid);
+        }
+
+        void Swap(int first)
+        {
+            (S.Commands[first], S.Commands[first + 1]) = (S.Commands[first + 1], S.Commands[first]);
+            Changed();
+            BuildCommands();
+        }
+    }
+
+    private async void OnNewCommand(object sender, RoutedEventArgs e) => await EditCommandAsync(null);
+
+    private async Task EditCommandAsync(WheelCommand? command)
+    {
+        if (await CommandEditor.EditAsync(XamlRoot, command) is not { } edited)
+            return;
+        var index = command is null ? -1 : S.Commands.IndexOf(command);
+        if (index >= 0)
+            S.Commands[index] = edited;
+        else
+            S.Commands.Add(edited);
+        Changed();
+        BuildCommands();
+    }
+
     // ---- Opens on ----
 
     private void BuildOpensOn()
@@ -417,7 +469,7 @@ internal static class OrderedList
         }
     }
 
-    private static Button IconButton(string glyph, string label, int column, bool enabled, Action click)
+    public static Button IconButton(string glyph, string label, int column, bool enabled, Action click)
     {
         var button = new Button
         {
