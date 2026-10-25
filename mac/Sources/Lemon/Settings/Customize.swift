@@ -57,6 +57,7 @@ struct Prefs: Codable, Equatable {
     // Optional so prefs saved before these existed still decode.
     var hidden: Set<String>? = nil      // built-in rings switched off, by WheelMode id
     var rings: [CustomRing]? = nil
+    var commands: [WheelCommand]? = nil
     var hub: Bool? = nil                // every file opens on the hub
     var backPill: Bool? = nil           // back to the hub from a pill under the ring, instead of the center
     var start: [Kind: String]? = nil    // without the hub, the ring files of a kind open on; missing = the first ring
