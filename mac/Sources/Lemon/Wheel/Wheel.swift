@@ -585,9 +585,12 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private func open() {
         guard down, !fired, pb.changeCount != dragCount else { return }
         fired = true   // once per drag, so an unsupported drag (text, or no files) doesn't re-read the pasteboard on every move
-        // A link counts as a link even when the browser adds a file for it.
-        let links = (pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []).filter { ["http", "https"].contains($0.scheme?.lowercased()) }
-        if !links.isEmpty { show([], links: links); return }
+        // A link counts as a link even when the browser adds a file for it, but only with a command for links: otherwise
+        // a drag carrying both still converts its files.
+        if (PrefStore.shared.p.commands ?? []).contains(where: \.forLinks) {
+            let links = (pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []).filter { ["http", "https"].contains($0.scheme?.lowercased()) }
+            if !links.isEmpty { show([], links: links); return }
+        }
         guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
         let flat = urls.filter { kindOf[ext(of: $0)] != nil || $0.hasDirectoryPath }
         if !flat.isEmpty { show(flat) }
