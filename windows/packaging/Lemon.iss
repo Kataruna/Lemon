@@ -2,7 +2,7 @@
 ; Installs for the current user only: no admin prompt, into %LOCALAPPDATA%\Programs\Lemon.
 
 #ifndef AppVersion
-  #define AppVersion "0.4.0"
+  #define AppVersion "0.4.1"
 #endif
 
 [Setup]
@@ -27,16 +27,17 @@ Compression=lzma2/max
 SolidCompression=yes
 OutputDir=..\..\dist\Windows
 OutputBaseFilename=Lemon-Setup
-; Lemon holds this mutex while running (also from the tray), so Setup and Uninstall ask to quit it first.
-AppMutex=Lemon.App
+; Lemon holds the mutex "Lemon.App" while running; Setup and Uninstall quit it first (see CloseLemon below), also when
+; silent, as under winget, where AppMutex would just give up.
 CloseApplications=yes
 
 [Tasks]
 Name: "contextmenu"; Description: "Add ""Convert with Lemon"" to the right-click menu in File Explorer"; GroupDescription: "Windows integration:"
 Name: "startup"; Description: "Start Lemon in the notification area when I sign in, so the conversion wheel is always ready"; GroupDescription: "Windows integration:"
 ; Models are downloaded (and checked against a SHA-256) into %LOCALAPPDATA%\Lemon\models; see [Code] below.
-Name: "modellite"; Description: "Download the AI model for Remove background: BiRefNet Lite (224 MB, recommended)"; GroupDescription: "Background remover (needs internet):"
-Name: "modelfull"; Description: "Download the higher-quality AI model: BiRefNet (973 MB, needs more memory)"; GroupDescription: "Background remover (needs internet):"; Flags: unchecked
+; Not in silent installs (winget): a quiet install shouldn't pull a gigabyte. Settings › Background remover downloads them later.
+Name: "modellite"; Description: "Download the AI model for Remove background: BiRefNet Lite (224 MB, recommended)"; GroupDescription: "Background remover (needs internet):"; Check: Interactive
+Name: "modelfull"; Description: "Download the higher-quality AI model: BiRefNet (973 MB, needs more memory)"; GroupDescription: "Background remover (needs internet):"; Flags: unchecked; Check: Interactive
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
@@ -54,6 +55,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; Lemon writes the menu itself so it only offers formats this PC can produce.
 Filename: "{app}\Lemon.exe"; Parameters: "--register-context-menu"; StatusMsg: "Adding Convert with Lemon to File Explorer…"; Tasks: contextmenu; Flags: runhidden waituntilterminated
 Filename: "{app}\Lemon.exe"; Description: "{cm:LaunchProgram,Lemon}"; Flags: nowait postinstall skipifsilent
+; A silent upgrade (winget) puts back the Lemon it quit, in the tray as at sign-in.
+Filename: "{app}\Lemon.exe"; Parameters: "--background"; Flags: nowait; Check: RestartAfterSilentInstall
 
 [UninstallRun]
 ; Removes the right-click menu and the sign-in entry, including ones turned on later from Lemon's Settings.
@@ -71,6 +74,51 @@ const
 var
   Downloads: TDownloadWizardPage;
   Failed: String;
+  WasRunning: Boolean;
+
+// Quits a running Lemon so its files can be replaced or removed: asks first unless silent. False if it's still running.
+function CloseLemon(Silent: Boolean): Boolean;
+var
+  Code, I: Integer;
+begin
+  Result := True;
+  if not CheckForMutexes('Lemon.App') then
+    Exit;
+  WasRunning := True;
+  if not Silent and (MsgBox('Lemon is running. Setup will quit it to continue.', mbConfirmation, MB_OKCANCEL) <> IDOK) then
+  begin
+    Result := False;
+    Exit;
+  end;
+  // /F: closing the window only sends Lemon to the tray.
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Lemon.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
+  for I := 1 to 50 do
+    if CheckForMutexes('Lemon.App') then
+      Sleep(100);
+  Result := not CheckForMutexes('Lemon.App');
+  if not Result and not Silent then
+    MsgBox('Lemon couldn''t be quit. Right-click the lemon by the clock, choose Quit Lemon, and try again.', mbError, MB_OK);
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := CloseLemon(WizardSilent);
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  Result := CloseLemon(UninstallSilent);
+end;
+
+function Interactive: Boolean;
+begin
+  Result := not WizardSilent;
+end;
+
+function RestartAfterSilentInstall: Boolean;
+begin
+  Result := WizardSilent and WasRunning;
+end;
 
 function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
 begin

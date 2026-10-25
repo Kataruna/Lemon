@@ -93,7 +93,8 @@ Steps:
    gh release create mac-v0.4.0 dist/MacOS/Lemon-0.4.0-mac.zip --target main --title "Lemon - Mac 0.4.0" --notes-file notes.md
    ```
 
-4. **Mac only:** update the Homebrew cask in [Kataruna/homebrew-tap](https://github.com/Kataruna/homebrew-tap): set `version` and `sha256` (`shasum -a 256 dist/MacOS/Lemon-X.Y.Z-mac.zip`) in `Casks/lemon.rb`, run `brew audit --cask --strict kataruna/tap/lemon`, and push.
+4. **Windows only:** update the winget package `Kataruna.Lemon`. Set the version, the installer URL and `InstallerSha256` (`Get-FileHash dist\Windows\Lemon-X.Y.Z-Setup.exe`) in `windows/packaging/winget/`, check it with `winget validate --manifest windows\packaging\winget`, and open a PR adding the three files to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) under `manifests/k/Kataruna/Lemon/X.Y.Z/`. winget installs silently: Setup quits a running Lemon and starts it again in the tray, keeps the previous right-click menu and sign-in choices, and skips the model downloads.
+5. **Mac only:** update the Homebrew cask in [Kataruna/homebrew-tap](https://github.com/Kataruna/homebrew-tap): set `version` and `sha256` (`shasum -a 256 dist/MacOS/Lemon-X.Y.Z-mac.zip`) in `Casks/lemon.rb`, run `brew audit --cask --strict kataruna/tap/lemon`, and push.
 
 The release notes say what's new, the requirements, and the install steps (including the SmartScreen or Gatekeeper workaround).
 
