@@ -34,6 +34,26 @@ struct ShakeDetector {
     }
 }
 
+/// The wheel key over a selection once the wheel is up: a tap enters what's lit, a hold closes the wheel. Fed by a poll
+/// of the key. The hold that opened the wheel is neither; nor is a press with another key in it (Control+W).
+struct KeyTap {
+    static let hold = 0.7
+    enum Action { case enter, close }
+    private var armed = false, downAt: Double?, spoiled = false
+    mutating func update(held: Bool, now: Double) -> Action? {
+        guard held else {
+            defer { downAt = nil; spoiled = false; armed = true }
+            return downAt != nil && !spoiled ? .enter : nil
+        }
+        guard armed else { return nil }
+        if downAt == nil { downAt = now }
+        if !spoiled, now - downAt! >= Self.hold { spoiled = true; return .close }
+        return nil
+    }
+    /// Another key went down with the wheel key held.
+    mutating func otherKey() { spoiled = true }
+}
+
 // MARK: which presets go on the wheel (port of ConversionWheel.cs)
 
 /// The Convert ring until the user picks their own in Settings.
@@ -517,16 +537,15 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private var movedOff = false
     /// Where the pointer was at the last look: it only takes over from the arrow keys once it moves.
     private var lastMouse: NSPoint?
-    /// The wheel stays up over a selection once the key is let go. Then a tap of the key enters what's lit and holding
-    /// it closes the wheel. `armed`: the key has been let go since the wheel opened (the hold that opened it isn't a tap).
-    /// `pressedAt`: when the key went down. `spoiled`: another key went with it (Control+W), so it isn't a tap.
-    private var armed = false, pressedAt: Date?, spoiled = false
+    /// The wheel stays up over a selection once the key is let go: a tap of it enters what's lit, a hold closes it.
+    private var keyTap = KeyTap()
 
     func start() {
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel]) { [weak self] e in
             MainActor.assumeIsolated { self?.handle(e) }
         }
-        NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
+        // Only modifier changes: a monitor of every key would wake Lemon for each keystroke in every app.
+        NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] e in
             MainActor.assumeIsolated { self?.holdEvent(e) }
         }
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] e in
@@ -588,7 +607,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         guard NSEvent.pressedMouseButtons & 1 != 0 || selection != nil else { return false }
         // ⌘-Tab, ⌘W and the like belong to the system and the apps.
         guard !e.flags.contains(.maskCommand) else { return false }
-        if pressedAt != nil { spoiled = true }
+        if let f = PrefStore.shared.p.key.flag, e.flags.contains(f == .control ? .maskControl : .maskShift) { keyTap.otherKey() }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
         guard panel?.isVisible == true else {
             let p = PrefStore.shared.p
@@ -665,21 +684,24 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
 
     /// The key (Control or Shift) alone, with Finder in front and no button down, starts the hold; anything else cancels it.
     private func holdEvent(_ e: NSEvent) {
-        // A right-click (Control-click) elsewhere closes the wheel, as a click does.
-        if selection != nil, e.type == .rightMouseDown || e.type == .otherMouseDown { hide(); return }
         let p = PrefStore.shared.p
         guard let flag = p.key.flag, e.type == .flagsChanged, e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == flag,
               p.onKey, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { cancelHold(); return }
         hold?.cancel()
+        let start = Date()
         hold = Task {
             try? await Task.sleep(nanoseconds: 700_000_000)
-            // Typing a capital in a rename or the search field isn't a hold.
-            guard !Task.isCancelled, !typing() else { return }
+            // A key, a click or a scroll meanwhile means the key was a modifier (Control-click, Shift+A), and typing a
+            // capital in a rename or the search field isn't a hold either. Asked of the system, so no monitor is needed.
+            let since = Date().timeIntervalSince(start)
+            let busy = [CGEventType.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+                .contains { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) < since }
+            guard !Task.isCancelled, !busy, !typing() else { return }
             let urls = wheelItems(await finderSelection())
             guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(flag), NSEvent.pressedMouseButtons == 0 else { return }
             hold = nil
-            selection = urls; movedOff = false; lastMouse = nil; armed = false; pressedAt = nil
+            selection = urls; movedOff = false; lastMouse = nil; keyTap = KeyTap()
             show(urls)
             guard panel?.isVisible == true else { selection = nil; return }
             follow = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { WheelController.shared.track() } }
@@ -735,19 +757,18 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         guard selection != nil, let panel, panel.isVisible,
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { hide(); return }
         let m = NSEvent.mouseLocation, f = panel.frame
+        // A click (or a Control-click) outside the wheel closes it; ones on it are the local monitor's.
+        if !force, NSEvent.pressedMouseButtons != 0, !f.contains(m) { hide(); return }
         if force || m != lastMouse {
             lastMouse = m
             model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
             if !model.lemonHot { movedOff = true }
         }
         guard let flag = PrefStore.shared.p.key.flag else { return }
-        let held = NSEvent.modifierFlags.contains(flag)
-        if !held {
-            if pressedAt != nil, !spoiled { pressedAt = nil; activate(); return }
-            pressedAt = nil; armed = true
-        } else if armed {
-            if pressedAt == nil { pressedAt = Date(); spoiled = false }
-            else if !spoiled, Date().timeIntervalSince(pressedAt!) >= 0.7 { hide() }   // held as long as the hold that opened it
+        switch keyTap.update(held: NSEvent.modifierFlags.contains(flag), now: ProcessInfo.processInfo.systemUptime) {
+        case .enter: activate()
+        case .close: hide()
+        case nil: break
         }
     }
 
@@ -801,7 +822,6 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     private func hide() {
-        armed = false; pressedAt = nil
         selection = nil; follow?.invalidate(); follow = nil
         panel?.orderOut(nil)
         syncTap()

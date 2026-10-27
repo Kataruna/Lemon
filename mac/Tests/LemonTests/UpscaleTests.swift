@@ -36,3 +36,27 @@ final class UpscaleTests: XCTestCase {
         m.hovered = nil; m.step(-1); XCTAssertEqual(m.hovered, p[2])
     }
 }
+
+final class KeyTapTests: XCTestCase {
+    func testOpeningHoldIsNeitherTapNorClose() {
+        var t = KeyTap()
+        XCTAssertNil(t.update(held: true, now: 0)); XCTAssertNil(t.update(held: true, now: 2))
+        XCTAssertNil(t.update(held: false, now: 2.1))
+    }
+    func testTapEntersHoldCloses() {
+        var t = KeyTap()
+        _ = t.update(held: false, now: 0)
+        XCTAssertNil(t.update(held: true, now: 1)); XCTAssertEqual(t.update(held: false, now: 1.2), .enter)
+        XCTAssertNil(t.update(held: true, now: 2)); XCTAssertEqual(t.update(held: true, now: 2.7), .close)
+        XCTAssertNil(t.update(held: true, now: 3)); XCTAssertNil(t.update(held: false, now: 3.1))
+    }
+    /// Control+D: D can arrive before the first poll sees Control; either way it's neither a tap nor a close.
+    func testAnotherKeySpoilsThePress() {
+        var t = KeyTap()
+        _ = t.update(held: false, now: 0)
+        t.otherKey()
+        XCTAssertNil(t.update(held: true, now: 1)); XCTAssertNil(t.update(held: true, now: 2)); XCTAssertNil(t.update(held: false, now: 2.1))
+        XCTAssertNil(t.update(held: true, now: 3)); t.otherKey(); XCTAssertNil(t.update(held: false, now: 3.1))
+        XCTAssertNil(t.update(held: true, now: 4)); XCTAssertEqual(t.update(held: false, now: 4.1), .enter)
+    }
+}

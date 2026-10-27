@@ -36,8 +36,15 @@ enum Upscale {
         guard a.count == 4, let m = AIModel.all.first(where: { $0.file == a[0] }), let scale = Int(a[1]) else { return 2 }
         // exit() skips the session's teardown, and that's what deletes the compiled Core ML model from the temp folder.
         defer { ModelRunner.release(m) }
+        // Cancel sends SIGTERM, which would end the process without that teardown too: stop at the next tile instead.
+        let stop = Flag()
+        signal(SIGTERM, SIG_IGN)
+        let term = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        term.setEventHandler { stop.set() }
+        term.resume()
+        defer { term.cancel() }
         do {
-            try run(m, URL(fileURLWithPath: a[2]), URL(fileURLWithPath: a[3]), scale: scale) { p in if let p { print(p); fflush(stdout) } }
+            try run(m, URL(fileURLWithPath: a[2]), URL(fileURLWithPath: a[3]), scale: scale, cancelled: { stop.isSet }) { p in if let p { print(p); fflush(stdout) } }
             return 0
         } catch {
             FileHandle.standardError.write(((error as? LemonError)?.message ?? "Upscaling failed: \(error.localizedDescription)").data(using: .utf8)! + Data([10]))
@@ -45,7 +52,7 @@ enum Upscale {
         }
     }
 
-    static func run(_ m: AIModel, _ src: URL, _ dst: URL, scale: Int, _ progress: @escaping @Sendable (Double?) -> Void) throws {
+    static func run(_ m: AIModel, _ src: URL, _ dst: URL, scale: Int, cancelled: @escaping () -> Bool = { false }, _ progress: @escaping @Sendable (Double?) -> Void) throws {
         let e = ext(of: src)
         guard let source = CGImageSourceCreateWithURL(src as CFURL, nil) else { throw LemonError(message: "Couldn't read the image.") }
         // Only the first frame would survive.
@@ -74,7 +81,7 @@ enum Upscale {
         var result: [UInt8]
         do {
             defer { ModelRunner.runLock.unlock() }
-            result = try tiled(rgb, w, h, scale: scale, tile: tile(m), progress: { progress(0.05 + 0.85 * $0) }) { input, tw, th in
+            result = try tiled(rgb, w, h, scale: scale, tile: tile(m), cancelled: cancelled, progress: { progress(0.05 + 0.85 * $0) }) { input, tw, th in
                 try ModelRunner.predict(ModelRunner.session(m), input, shape: [1, 3, th, tw])
             }
         }
@@ -135,7 +142,7 @@ enum Upscale {
 
     /// Runs `model` tile by tile over interleaved RGB bytes and returns the enlarged RGB bytes. `model` takes planar
     /// RGB 0...1 of tw × th and returns planar RGB 4× as large.
-    static func tiled(_ src: [UInt8], _ width: Int, _ height: Int, scale: Int, tile: Int = 256,
+    static func tiled(_ src: [UInt8], _ width: Int, _ height: Int, scale: Int, tile: Int = 256, cancelled: () -> Bool = { false },
                       progress: (Double) -> Void = { _ in }, model: ([Float], Int, Int) throws -> [Float]) throws -> [UInt8] {
         // Every tile has the same shape (edge tiles are moved inward), so the runtime doesn't re-plan per tile.
         let tw = min(tile + 2 * pad, width), th = min(tile + 2 * pad, height)
@@ -149,6 +156,7 @@ enum Upscale {
 
         for row in 0..<rows {
             for column in 0..<columns {
+                if cancelled() { throw CancellationError() }
                 let x0 = column * tile, y0 = row * tile
                 let x1 = min(x0 + tile, width), y1 = min(y0 + tile, height)
                 let wx = min(max(x0 - pad, 0), width - tw), wy = min(max(y0 - pad, 0), height - th)
@@ -196,4 +204,10 @@ actor Gate {
         await withCheckedContinuation { waiting.append($0) }   // handed over by leave(), still busy
     }
     func leave() { if waiting.isEmpty { busy = false } else { waiting.removeFirst().resume() } }
+}
+
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock(); private var on = false
+    func set() { lock.lock(); on = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return on }
 }
