@@ -31,6 +31,8 @@ enum Upscale {
     /// The child: prints progress as lines of 0...1, and an error as the last line of stderr.
     static func child(_ a: [String]) -> Int32 {
         guard a.count == 4, let m = AIModel.all.first(where: { $0.file == a[0] }), let scale = Int(a[1]) else { return 2 }
+        // exit() skips the session's teardown, and that's what deletes the compiled Core ML model from the temp folder.
+        defer { ModelRunner.release(m) }
         do {
             try run(m, URL(fileURLWithPath: a[2]), URL(fileURLWithPath: a[3]), scale: scale) { p in if let p { print(p); fflush(stdout) } }
             return 0
@@ -95,8 +97,8 @@ enum Upscale {
         return px
     }
 
-    /// Writes in the source's format with its metadata (upright now, so orientation 1). ImageIO can't write WebP (and
-    /// on some systems AVIF), so those go through a PNG and magick.
+    /// Writes in the source's format with its metadata (upright now, so orientation 1). ImageIO can't write WebP, so
+    /// that (and anything else it can't write) goes through a PNG and magick.
     private static func write(_ picture: CGImage, _ props: [CFString: Any], to dst: URL, _ e: String) throws {
         var meta = props
         meta[kCGImagePropertyOrientation] = 1

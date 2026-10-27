@@ -119,7 +119,8 @@ func presets(for url: URL) -> [Preset] {
     out += PrefStore.shared.p.custom.filter { c in out.contains { $0.kind == c.kind && $0.ext == c.ext } || (canSame && c.kind == kind && c.ext == same) }
     // BiRefNet presets stay hidden until their model is downloaded.
     if kind == .image { out += backgroundPresets.filter { AIModel.of($0.removeBackground!)?.installed ?? true } }
-    if upscalable.contains(src) { out += upscalePresets.filter { AIModel.of($0.upscale!).installed } }
+    // ImageIO can't write WebP, so that goes through magick.
+    if upscalable.contains(src), src != "webp" || has("magick") { out += upscalePresets.filter { AIModel.of($0.upscale!).installed } }
     // Custom Resize presets (Keep the original format) go ahead of the built-in sizes.
     if kind == .image, has("magick") { out += PrefStore.shared.p.custom.filter(\.isResize) + resizePresets }
     if optimizable(src) { out = optimizePresets.filter { $0.strength != .lossless || ["png", "gif"].contains(src) } + out }

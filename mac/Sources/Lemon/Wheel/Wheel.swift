@@ -668,9 +668,20 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role as? String ?? "")
     }
 
-    /// Finder's selection (the desktop's too), asked through AppleScript: macOS asks once for permission to control
-    /// Finder. Empty if it's refused or Finder doesn't answer within a second.
+    /// Finder's selection (the desktop's too), asked through AppleScript. Empty if Lemon may not control Finder or
+    /// Finder doesn't answer within a second.
     private func finderSelection() async -> [URL] {
+        // Asked first and without a time limit: the first time, macOS asks the user, and a timed-out osascript would
+        // take the question away before it's answered. osascript then runs on Lemon's permission.
+        let allowed = await withCheckedContinuation { c in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var finder = AEAddressDesc(), id = Array("com.apple.finder".utf8)
+                guard AECreateDesc(typeApplicationBundleID, &id, id.count, &finder) == noErr else { c.resume(returning: false); return }
+                defer { AEDisposeDesc(&finder) }
+                c.resume(returning: AEDeterminePermissionToAutomateTarget(&finder, typeWildCard, typeWildCard, true) == noErr)
+            }
+        }
+        guard allowed else { return [] }
         let script = """
             tell application "Finder" to set s to selection as alias list
             set o to ""
