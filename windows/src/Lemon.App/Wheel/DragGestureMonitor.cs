@@ -20,6 +20,7 @@ internal sealed class DragGestureMonitor : IDisposable
     private readonly Native.HookProc _keyboardProc;
     private readonly ShakeDetector _shake = new();
     private readonly KeyHold _hold = new();
+    private readonly KeyTap _tap = new();
     private Thread? _thread;
     private uint _threadId;
     private nint _mouseHook;
@@ -32,6 +33,8 @@ internal sealed class DragGestureMonitor : IDisposable
     private bool _swallowingTab;
     private bool _swallowingEscape;
     private bool _swallowingClick;
+    private bool _swallowingTap;
+    private bool _swallowingReturn;
 
     public DragGestureMonitor()
     {
@@ -64,8 +67,17 @@ internal sealed class DragGestureMonitor : IDisposable
     /// <summary>The held wheel key came up. Raised on the hook thread.</summary>
     public event Action? HeldKeyReleased;
 
-    /// <summary>A click while the wheel is up for a held key: it picks what's under the pointer. Raised on the hook thread.</summary>
+    /// <summary>A click on the wheel while it's up over selected files: it enters what's under the pointer. Raised on the hook thread.</summary>
     public event Action? HeldClick;
+
+    /// <summary>Over selected files, a tap of the wheel key or Return: enter what's lit. Raised on the hook thread.</summary>
+    public event Action? EnterRequested;
+
+    /// <summary>Over selected files, A / W (-1) or D / S (+1): light the slice before or after. Raised on the hook thread.</summary>
+    public event Action<int>? StepRequested;
+
+    /// <summary>Over selected files, the wheel key held again or a click outside the wheel. Raised on the hook thread.</summary>
+    public event Action? CloseRequested;
 
     /// <summary>
     /// Whether the conversion wheel is up. Tab and scrolling are only taken over while it is and a drag is going on,
@@ -75,6 +87,9 @@ internal sealed class DragGestureMonitor : IDisposable
 
     /// <summary>Whether the wheel is up for the files selected in Explorer (no drag). Called on the hook thread.</summary>
     public Func<bool>? IsSelectionWheelOpen { get; set; }
+
+    /// <summary>The wheel's window, to tell a click on it from one outside it.</summary>
+    public nint WheelHandle { get; set; }
 
     public bool ShakeEnabled { get; set; } = true;
 
@@ -132,12 +147,23 @@ internal sealed class DragGestureMonitor : IDisposable
         if (code >= 0)
         {
             var message = (int)wParam;
-            // A click while the wheel is up for a held key picks; the app under the wheel never sees it.
-            if (message == Native.WM_LBUTTONDOWN && SelectionOpen)
+            // Over selected files, a click on the wheel enters what's under the pointer and the app under the wheel never
+            // sees it. A click anywhere else closes the wheel and goes through. The window's rectangle, not WindowFromPoint,
+            // which may send messages and so stall the hook.
+            if (message is Native.WM_LBUTTONDOWN or Native.WM_RBUTTONDOWN or Native.WM_MBUTTONDOWN && SelectionOpen)
             {
-                _swallowingClick = true;
-                HeldClick?.Invoke();
-                return 1;
+                _tap.Spoil();
+                var point = Info(lParam).Point;
+                var onWheel = Native.GetWindowRect(WheelHandle, out var rect)
+                    && point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;
+                if (!onWheel)
+                    CloseRequested?.Invoke();
+                else if (message == Native.WM_LBUTTONDOWN)
+                {
+                    _swallowingClick = true;
+                    HeldClick?.Invoke();
+                    return 1;
+                }
             }
             if (message == Native.WM_LBUTTONUP && _swallowingClick)
             {
@@ -192,13 +218,24 @@ internal sealed class DragGestureMonitor : IDisposable
             var isUp = message is Native.WM_KEYUP or Native.WM_SYSKEYUP;
             var isWheelKey = WheelKey != 0 && Generic(info.VirtualKey) == WheelKey;
 
+            // Once the wheel is up over selected files, the wheel key is the wheel's: a tap enters what's lit, a hold
+            // closes it. Not the press that opened it (still held), whose release reaches the app as before. Swallowed,
+            // Alt never opens Explorer's menu.
+            if (isWheelKey && (_swallowingTap || isDown && SelectionOpen && !_hold.IsHeld))
+            {
+                if (isDown && _tap.Down(Environment.TickCount64))
+                    StartHoldTimer();
+                _swallowingTap = isDown;
+                if (isUp && _tap.Up() && SelectionOpen)
+                    EnterRequested?.Invoke();
+                return 1;
+            }
+            if (isDown && !isWheelKey)
+                _tap.Spoil();
+
             // Holding the wheel key on its own, without a drag: the wheel for the files selected in Explorer.
             if (isDown && !_swallowingKey && !IsLeftButtonDown() && _hold.Down(isWheelKey, Environment.TickCount64))
-            {
-                if (_holdTimer != 0)
-                    Native.KillTimer(0, _holdTimer);
-                _holdTimer = Native.SetTimer(0, 0, (uint)KeyHold.Delay.TotalMilliseconds + 20, 0);
-            }
+                StartHoldTimer();
             // Raised even before the wheel is up: it may still be reading the selection, and must not open after this.
             if (isUp && isWheelKey && !_swallowingKey && _hold.Up())
             {
@@ -238,6 +275,35 @@ internal sealed class DragGestureMonitor : IDisposable
                 }
             }
 
+            // Over selected files (not mid-drag, where a drop goes where the pointer is): A W and D S, or the arrows, light
+            // the slice before or after the lit one, and Return (keypad Enter too) enters it. Not with Ctrl or Win held,
+            // so Ctrl+S or Win+D still work.
+            // The rest of a Return press that entered something is ours too: once a slice runs the wheel isn't open
+            // any more, and an auto-repeat reaching Explorer would open every selected file.
+            if (info.VirtualKey == Native.VK_RETURN && _swallowingReturn)
+            {
+                if (isUp)
+                    _swallowingReturn = false;
+                return 1;
+            }
+            if (isDown && SelectionOpen && !Held(Native.VK_CONTROL) && !Held(Native.VK_LWIN) && !Held(Native.VK_RWIN))
+            {
+                switch (info.VirtualKey)
+                {
+                    case 0x41 or 0x57 or 0x25 or 0x26: // A, W, left, up
+                        StepRequested?.Invoke(-1);
+                        return 1;
+                    case 0x44 or 0x53 or 0x27 or 0x28: // D, S, right, down
+                        StepRequested?.Invoke(1);
+                        return 1;
+                    case Native.VK_RETURN:
+                        // Once per press (repeats are swallowed above): one would go on into the ring it just opened.
+                        EnterRequested?.Invoke();
+                        _swallowingReturn = true;
+                        return 1;
+                }
+            }
+
             // 1-9 jump straight to that ring and 0 to the hub, only while the wheel is up.
             if (isDown && info.VirtualKey is >= 0x30 and <= 0x39 && WheelTakesInput)
             {
@@ -252,9 +318,10 @@ internal sealed class DragGestureMonitor : IDisposable
             {
                 if (isDown && (_swallowingTab || WheelTakesInput))
                 {
-                    // Turn once per press; auto-repeats while it's held are swallowed too. Shift+Tab goes back,
-                    // unless Shift is the key being held for the wheel.
-                    var back = WheelKey != Native.VK_SHIFT && (Native.GetAsyncKeyState(Native.VK_SHIFT) & 0x8000) != 0;
+                    // Turn once per press; auto-repeats while it's held are swallowed too. Shift+Tab goes back, unless
+                    // Shift is the key held for the wheel. Over selected files after the opening hold, Shift pressed
+                    // again is the wheel's (swallowed, so Windows doesn't see it down) and goes back too.
+                    var back = WheelKey == Native.VK_SHIFT ? _swallowingTap : Held(Native.VK_SHIFT);
                     if (!_swallowingTab)
                         PageRequested?.Invoke(back ? -1 : 1);
                     _swallowingTab = true;
@@ -290,13 +357,25 @@ internal sealed class DragGestureMonitor : IDisposable
         return Native.CallNextHookEx(0, code, wParam, lParam);
     }
 
+    private void StartHoldTimer()
+    {
+        if (_holdTimer != 0)
+            Native.KillTimer(0, _holdTimer);
+        _holdTimer = Native.SetTimer(0, 0, (uint)KeyHold.Delay.TotalMilliseconds + 20, 0);
+    }
+
     private void OnHoldTimer()
     {
         Native.KillTimer(0, _holdTimer);
         _holdTimer = 0;
-        if (_hold.Due(Environment.TickCount64) && !IsLeftButtonDown() && Native.GetCursorPos(out var point))
+        var now = Environment.TickCount64;
+        if (_tap.Due(now))
+            CloseRequested?.Invoke();
+        else if (_hold.Due(now) && !IsLeftButtonDown() && Native.GetCursorPos(out var point))
             KeyHeld?.Invoke(point.X, point.Y);
     }
+
+    private static bool Held(int key) => (Native.GetAsyncKeyState(key) & 0x8000) != 0;
 
     /// <summary>The hook sees left and right Shift, Ctrl and Alt; settings name the generic key.</summary>
     private static int Generic(uint key) => key switch

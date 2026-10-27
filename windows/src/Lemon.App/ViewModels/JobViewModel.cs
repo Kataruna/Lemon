@@ -54,7 +54,7 @@ public sealed partial class JobViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsEditable), nameof(IsActive), nameof(IsDone), nameof(IsFailed), nameof(CanRetry),
-        nameof(ShowProgress), nameof(StatusText), nameof(IsStartable))]
+        nameof(ShowProgress), nameof(StatusText), nameof(IsStartable), nameof(IsIndeterminate))]
     public partial JobStatus Status { get; set; }
 
     [ObservableProperty]
@@ -77,8 +77,11 @@ public sealed partial class JobViewModel : ObservableObject
     public bool CanRetry => Status is JobStatus.Failed or JobStatus.Canceled;
     public bool ShowProgress => Status == JobStatus.Converting;
 
-    /// <summary>Converters that only report completion get a moving bar instead of one stuck at 0%.</summary>
-    public bool IsIndeterminate => Progress <= 0;
+    /// <summary>
+    /// Converters that only report completion get a moving bar instead of one stuck at 0%. Only while converting: the
+    /// collapsed bar of every waiting file would otherwise keep its animation running, even with the window hidden.
+    /// </summary>
+    public bool IsIndeterminate => ShowProgress && Progress <= 0;
 
     public string StatusText => Status switch
     {

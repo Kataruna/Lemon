@@ -127,8 +127,13 @@ public sealed class ImageConverter : IConverter
     /// <summary>Whether the image is already within the preset's maximum size.</summary>
     public static bool Fits(string path, Preset preset)
     {
-        var info = new MagickImageInfo(path);
-        return info.Width <= (preset.MaxWidth ?? int.MaxValue) && info.Height <= (preset.MaxHeight ?? int.MaxValue);
+        // Pinged, not read: only the header. Sized as it'll be resized, after AutoOrient turns a phone photo stored on its
+        // side upright; otherwise a 2560×1440 portrait would look small enough for a 1440 px max height.
+        using var image = new MagickImage();
+        image.Ping(path);
+        var turned = image.Orientation is OrientationType.LeftTop or OrientationType.RightTop or OrientationType.RightBottom or OrientationType.LeftBottom;
+        var (width, height) = turned ? (image.Height, image.Width) : (image.Width, image.Height);
+        return width <= (preset.MaxWidth ?? int.MaxValue) && height <= (preset.MaxHeight ?? int.MaxValue);
     }
 
     private static void Prepare(IMagickImage<byte> image, Preset preset, MagickFormat format)

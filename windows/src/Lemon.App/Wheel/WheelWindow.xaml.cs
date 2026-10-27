@@ -99,6 +99,10 @@ public sealed partial class WheelWindow : Window
     private readonly DispatcherQueueTimer _follow;
     /// <summary>Counts holds, so a selection that's read after the key came up is thrown away.</summary>
     private int _holdCount;
+    /// <summary>The Explorer window (or desktop) the selection came from; the wheel closes when it's no longer in front.</summary>
+    private nint _owner;
+    /// <summary>Where the pointer was last seen over a selection, so the keys' lit slice stays until it moves.</summary>
+    private Native.POINT? _cursor;
 
     private int _sizePx;
     /// <summary>Where the client area starts inside the window, past WinUI's frame.</summary>
@@ -449,57 +453,103 @@ public sealed partial class WheelWindow : Window
         if (IsOpen && !_closing)
             return;
         var hold = ++_holdCount;
-        var selected = await ExplorerSelection.ReadAsync(Native.GetForegroundWindow());
+        var owner = Native.GetForegroundWindow();
+        var selected = await ExplorerSelection.ReadAsync(owner);
         if (hold != _holdCount || selected.Count == 0 || (IsOpen && !_closing))
             return;
         ShowAt(x, y);
         _selection = true;
+        _owner = owner;
+        _cursor = null;
+        // Know where the pointer is before the files load: with none, loading would count the lemon as left already,
+        // and a tap right away would queue the files.
+        FollowPointer(force: true);
         _loading = LoadAsync([.. selected]);
         _follow.Start();
     }
 
-    /// <summary>The held key came up: pick what's under the pointer.</summary>
-    public void OnHeldKeyReleased()
-    {
-        _holdCount++;
-        if (IsSelectionOpen)
-            _ = PickAsync();
-    }
+    /// <summary>The held key came up. The wheel stays up; a selection still being read is thrown away.</summary>
+    public void OnHeldKeyReleased() => _holdCount++;
 
-    /// <summary>A click while the key is held picks too.</summary>
+    /// <summary>A click on the wheel enters what's under the pointer.</summary>
     public void OnHeldClick()
     {
-        if (IsSelectionOpen)
-            _ = PickAsync();
+        if (!IsSelectionOpen)
+            return;
+        FollowPointer(force: true);
+        // The hook only knows the window's rectangle; its corners are outside the wheel, so a click there closes it too.
+        if (_hover == None)
+            Hide();
+        else
+            Enter();
     }
 
     /// <summary>Up for the selected files and nothing picked yet. Read from the hook thread, so only plain fields.</summary>
     public bool IsSelectionOpen => IsOpen && _selection && !_closing && !_dropped;
 
-    /// <summary>Without a drag there are no drag events, so the wheel watches the pointer itself.</summary>
-    private void FollowPointer()
+    /// <summary>Esc: over selected files, inside a ring it goes back to the hub. Otherwise it closes the wheel.</summary>
+    public void OnEscape()
     {
-        if (!Native.GetCursorPos(out var cursor))
+        if (IsSelectionOpen && _plan.HubOn && !_inHub)
+            GoTo(HubTarget, -1);
+        else
+            Hide();
+    }
+
+    /// <summary>A W / D S: lights the slice (or the hub's ring) before or after the lit one, from the top, wrapping round.</summary>
+    public void Step(int step)
+    {
+        var count = _slices.Count;
+        if (!IsSelectionOpen || count == 0)
             return;
+        UpdateHover(_hover >= 0 ? (_hover + step + count) % count : step > 0 ? 0 : count - 1);
+        // Lit from the keys, a hub ring opens on Return or a tap, not by resting there.
+        _pageTimer.Stop();
+    }
+
+    /// <summary>
+    /// A tap of the key, Return or a click enters what's lit: on the hub the ring, on a ring the slice runs. The lemon,
+    /// once the pointer has left it, queues the files, or goes back to the hub when that's what it's for.
+    /// </summary>
+    public void Enter()
+    {
+        if (!IsSelectionOpen)
+            return;
+        var hit = _hover;
+        if (hit <= ChipHit && _chips.ElementAtOrDefault(ChipHit - hit) is var target)
+            GoTo(target, target == HubTarget || target > _ring ? 1 : -1);
+        else if (_inHub && hit >= 0)
+            GoTo(hit, 1);
+        else if (hit == CenterHit && CenterBack)
+        {
+            if (_centerArmed)
+                GoTo(HubTarget, -1);
+        }
+        else if ((hit >= 0 && hit < _choices.Count) || (hit == CenterHit && _centerArmed))
+            _ = PickAsync(hit);
+    }
+
+    /// <summary>Without a drag there are no drag events, so the wheel watches the pointer itself.</summary>
+    private void FollowPointer(bool force = false)
+    {
+        // Another window in front (Start, a click in the taskbar): close, or the keys the wheel takes would be lost there.
+        if (Native.GetForegroundWindow() != _owner)
+        {
+            Hide();
+            return;
+        }
+        if (!Native.GetCursorPos(out var cursor) || (!force && _cursor is { } last && last.X == cursor.X && last.Y == cursor.Y))
+            return;
+        _cursor = cursor;
         var origin = new Native.POINT();
         Native.ClientToScreen(Handle, ref origin);
         _pointer = new Point((cursor.X - origin.X) / _scale, (cursor.Y - origin.Y) / _scale);
         UpdateHover(HitTest(_pointer.Value));
     }
 
-    private async Task PickAsync()
+    private async Task PickAsync(int hit)
     {
-        FollowPointer();
         _follow.Stop();
-        var hit = _pointer is { } point ? HitTest(point) : None;
-        // Letting go somewhere that isn't a choice closes the wheel. So does letting go on the middle without having
-        // moved: the wheel opens centered on the pointer, so that's just a hold released, not "add to queue".
-        if (hit == None || hit <= ChipHit || (hit >= 0 && (_inHub || hit >= _choices.Count))
-            || (hit == CenterHit && (CenterBack || !_centerArmed)))
-        {
-            Hide();
-            return;
-        }
         _dropped = true;
         _pageTimer.Stop();
         if (_loading is not null)
@@ -1036,7 +1086,10 @@ public sealed partial class WheelWindow : Window
         _ = Task.Run(() => Glass.Blur(picture, blur, scale)).ContinueWith(task =>
         {
             if (task.Exception is { } error)
+            {
                 ErrorLog.Write("Blurring the wheel's glass", error);
+                picture.Dispose();
+            }
             else
                 DispatcherQueue.TryEnqueue(() =>
                 {

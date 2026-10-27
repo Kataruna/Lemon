@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.UI.Dispatching;
 
 namespace Lemon.App.ViewModels;
 
@@ -19,12 +20,26 @@ public sealed partial class QueueViewModel : ObservableObject
     /// once at the end instead of after every file, which made dropping thousands of files take minutes.
     /// </summary>
     private bool _bulk;
+    /// <summary>Works out the summary and the batch's progress at most every 100 ms while jobs change; see <see cref="OnJobChanged"/>.</summary>
+    private readonly DispatcherQueueTimer _refresh;
+    private bool _summaryDue;
 
     public QueueViewModel(AppSettings settings, PresetStore presets, ConversionService conversion)
     {
         _settings = settings;
         _presets = presets;
         _conversion = conversion;
+        _refresh = DispatcherQueue.GetForCurrentThread().CreateTimer();
+        _refresh.Interval = TimeSpan.FromMilliseconds(100);
+        _refresh.IsRepeating = false;
+        _refresh.Tick += (_, _) =>
+        {
+            if (_summaryDue)
+                UpdateSummary();
+            _summaryDue = false;
+            if (_batch.Count > 0)
+                UpdateBatchProgress();
+        };
         _presets.Changed += (_, _) => RefreshPresets();
         Jobs.CollectionChanged += OnJobsChanged;
         UpdateSummary();
@@ -189,16 +204,23 @@ public sealed partial class QueueViewModel : ObservableObject
         Jobs.Remove(job);
     }
 
-    public void ClearFinished()
-    {
-        foreach (var job in Jobs.Where(j => j.IsDone).ToList())
-            Remove(job);
-    }
+    public void ClearFinished() => RemoveAll(j => j.IsDone);
 
-    public void ClearAll()
+    public void ClearAll() => RemoveAll(j => !j.IsActive);
+
+    private void RemoveAll(Func<JobViewModel, bool> which)
     {
-        foreach (var job in Jobs.Where(j => !j.IsActive).ToList())
-            Remove(job);
+        _bulk = true;
+        try
+        {
+            foreach (var job in Jobs.Where(which).ToList())
+                Remove(job);
+        }
+        finally
+        {
+            _bulk = false;
+            UpdateSummary();
+        }
     }
 
     /// <summary>The kinds of files in the queue that can still be changed, with presets that fit them.</summary>
@@ -414,10 +436,15 @@ public sealed partial class QueueViewModel : ObservableObject
         }
 
         if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.SelectedPreset))
-            UpdateSummary();
+            _summaryDue = true;
+        else if (!(e.PropertyName == nameof(JobViewModel.Progress) && _batch.Contains(job)))
+            return;
 
-        if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.Progress) && _batch.Contains(job))
-            UpdateBatchProgress();
+        // Both walk the whole queue, and a batch of thousands of pictures changes several times per file. After every
+        // change (or even once per pass of the UI thread, since jobs finish spread out) a big batch was quadratic; at
+        // most every 100 ms it's not. Each row's own bar and status still follow its job straight away.
+        if (!_refresh.IsRunning)
+            _refresh.Start();
     }
 
     private void UpdateSummary()

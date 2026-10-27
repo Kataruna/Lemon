@@ -62,8 +62,18 @@ public sealed partial class WheelSettingsPage : Page
     {
         _saveTimer.Stop();
         _saveTimer.Start();
-        RefreshPreview();
+        // A slider or color picker drag changes dozens of times a second; one redraw per pass of the UI thread is enough.
+        if (_previewQueued)
+            return;
+        _previewQueued = true;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            _previewQueued = false;
+            RefreshPreview();
+        });
     }
+
+    private bool _previewQueued;
 
     /// <summary>Redraws the preview wheel: what files of the kind picked under "Convert ring" open on.</summary>
     private void RefreshPreview()
@@ -575,10 +585,13 @@ internal static class RingEditor
                     menu.Items.Add(sub);
             }
             add.IsEnabled = draft.PresetIds.Count < ConversionWheel.MaxChoices;
-            dialog.IsPrimaryButtonEnabled = name.Text.Trim().Length > 0 && draft.PresetIds.Count > 0;
+            UpdateSave();
         }
 
-        name.TextChanged += (_, _) => Refresh();
+        void UpdateSave() => dialog.IsPrimaryButtonEnabled = name.Text.Trim().Length > 0 && draft.PresetIds.Count > 0;
+
+        // Typing only changes whether it can be saved; the tool list and the menu stay as they are.
+        name.TextChanged += (_, _) => UpdateSave();
         Refresh();
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return null;

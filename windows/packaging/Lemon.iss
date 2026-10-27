@@ -2,7 +2,7 @@
 ; Installs for the current user only: no admin prompt, into %LOCALAPPDATA%\Programs\Lemon.
 
 #ifndef AppVersion
-  #define AppVersion "0.4.1"
+  #define AppVersion "0.5.0"
 #endif
 
 [Setup]

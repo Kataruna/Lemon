@@ -171,6 +171,9 @@ public sealed class UpscaleConverter : IConverter
         var outWidth = width * scale;
         var result = new byte[checked(outWidth * height * scale * 3)];
         var buffer = new float[3 * tw * th];
+        // Every tile is the same size, so one buffer serves them all instead of 4 MB of new memory per tile.
+        var tileWidth = tw * scale;
+        var tile = new byte[tileWidth * th * scale * 3];
         var (columns, rows) = ((width + Tile - 1) / Tile, (height + Tile - 1) / Tile);
 
         for (var row = 0; row < rows; row++)
@@ -188,13 +191,13 @@ public sealed class UpscaleConverter : IConverter
                         buffer[(c * th + y) * tw + x] = source[((wy + y) * width + wx + x) * 3 + c] / 255f;
 
             var (nw, nh) = (tw * NetScale, th * NetScale);
-            var tileWidth = tw * scale;
-            var tile = new byte[tileWidth * th * scale * 3];
             using (var results = session.Run([NamedOnnxValue.CreateFromTensor(inputName, new DenseTensor<float>(buffer, [1, 3, th, tw]))]))
             {
                 // Planar floats to interleaved bytes, a row per task: on one core this took as long as the model.
                 // For 2× each 2×2 block is averaged, an exact halving (a Lanczos resize per tile was slower than the model).
-                var output = results.First().AsTensor<float>().ToDenseTensor().Buffer;
+                // Read the result where ONNX Runtime left it: ToDenseTensor always copies, value by value (16 MB a tile).
+                var tensor = results.First().AsTensor<float>();
+                var output = (tensor as DenseTensor<float> ?? tensor.ToDenseTensor()).Buffer;
                 var step = NetScale / scale;
                 var weight = 255f / (step * step);
                 Parallel.For(0, th * scale, y =>

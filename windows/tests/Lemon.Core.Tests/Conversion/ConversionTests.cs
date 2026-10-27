@@ -79,6 +79,25 @@ public sealed class ConversionTests : IDisposable
     }
 
     [Fact]
+    public void A_photo_stored_on_its_side_is_sized_upright()
+    {
+        // Stored 200×100 with "rotate 90°": a 100×200 portrait once AutoOrient turns it.
+        var path = _temp.File("turned.jpg");
+        using (var image = new MagickImage(MagickColors.Orange, 200, 100))
+        {
+            // JPEG keeps it in EXIF, which ImageMagick only writes with both the tag and the property set.
+            var exif = new ExifProfile();
+            exif.SetValue(ExifTag.Orientation, (ushort)6);
+            image.SetProfile(exif);
+            image.Orientation = OrientationType.RightTop;
+            image.Write(path, MagickFormat.Jpeg);
+        }
+        var maxHeight = new Preset { Name = "150 high", TargetExtension = Preset.SameFormat, MaxHeight = 150 };
+
+        Assert.False(ImageConverter.Fits(path, maxHeight));
+    }
+
+    [Fact]
     public void ResizeIsOnlyForImages()
     {
         var hd = BuiltInPresets.All.Single(p => p.Id == "resize-hd");

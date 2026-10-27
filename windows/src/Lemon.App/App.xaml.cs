@@ -199,12 +199,16 @@ public partial class App : Application
         // Hook callbacks arrive on the hook thread; hand everything to the UI thread right away.
         gestures.Triggered += (x, y) => wheel.DispatcherQueue.TryEnqueue(() => wheel.ShowAt(x, y));
         gestures.ButtonReleased += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnDragEnded);
-        gestures.EscapePressed += () => wheel.DispatcherQueue.TryEnqueue(wheel.Hide);
+        gestures.EscapePressed += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnEscape);
         gestures.PageRequested += step => wheel.DispatcherQueue.TryEnqueue(() => wheel.TurnPage(step));
         gestures.PageSelected += number => wheel.DispatcherQueue.TryEnqueue(() => wheel.GoToNumber(number));
         gestures.KeyHeld += (x, y) => wheel.DispatcherQueue.TryEnqueue(() => wheel.ShowForSelection(x, y));
         gestures.HeldKeyReleased += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnHeldKeyReleased);
         gestures.HeldClick += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnHeldClick);
+        gestures.EnterRequested += () => wheel.DispatcherQueue.TryEnqueue(wheel.Enter);
+        gestures.StepRequested += step => wheel.DispatcherQueue.TryEnqueue(() => wheel.Step(step));
+        gestures.CloseRequested += () => wheel.DispatcherQueue.TryEnqueue(() => { if (wheel.IsSelectionOpen) wheel.Hide(); });
+        gestures.WheelHandle = wheel.Handle;
         gestures.IsWheelOpen = () => wheel.IsOpen;
         gestures.IsSelectionWheelOpen = () => wheel.IsSelectionOpen;
 

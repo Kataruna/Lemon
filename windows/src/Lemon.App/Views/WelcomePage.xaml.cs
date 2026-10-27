@@ -27,6 +27,17 @@ public sealed partial class WelcomePage : Page
     }
 
     /// <summary>
+    /// Closing the window hides it to the tray without leaving the page, so the endless demo is paused while it's hidden.
+    /// </summary>
+    public void OnWindowVisibilityChanged(bool visible)
+    {
+        if (!visible)
+            WheelDemo.Pause();
+        else if (WheelStep.Visibility == Visibility.Visible)
+            WheelDemo.Resume();
+    }
+
+    /// <summary>
     /// The user's own Convert ring for pictures, in their theme, with the drag aimed at its JPG slice (the first slice
     /// if JPG isn't on it); the new file takes that format's name.
     /// </summary>

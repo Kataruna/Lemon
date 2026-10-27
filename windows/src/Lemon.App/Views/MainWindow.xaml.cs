@@ -29,6 +29,7 @@ public sealed partial class MainWindow : Window
         else
             ShowWelcome();
         AppWindow.Closing += OnClosing;
+        VisibilityChanged += (_, e) => (ContentFrame.Content as WelcomePage)?.OnWindowVisibilityChanged(e.Visible);
     }
 
     private bool _closeConfirmed;

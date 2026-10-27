@@ -11,18 +11,38 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-27: Review fixes (rotated photos, big batches, upscale memory)
+
+| Windows | Mac |
+|---|---|
+| **Done** (the original) | **To do**: check whether the same problems exist |
+
+- **Resize and rotated photos.** "Already small enough" was decided from the pixels as stored, but the resize turns a photo upright by its EXIF orientation first. A phone photo stored 2560×1440 on its side (a 1440×2560 portrait) passed a custom preset with only a 1440 px max height and was left unresized. The check now reads the orientation and swaps width and height for 90° turns. Mac: check how the "fits already" test sizes a rotated photo.
+- **Big batches.** Each job's progress and status changes walked the whole queue several times on the UI thread, quadratic in the number of files. The summary and the batch's progress are now worked out at most every 100 ms (each row's own bar still follows its job at once). Measured on 2000 small PNG → JPG, 4 at a time: the UI thread was busy 3.0 → 1.3 s, the batch itself took as long. Clearing finished or all files also no longer redoes the summary per file. Mac: check how often the batch summary is recomputed.
+- **Upscale memory.** Each 256 px tile copied the model's 16 MB output value by value and allocated a new 4 MB tile buffer; it now reads the output where ONNX Runtime left it and reuses one buffer. Measured on a 1600×1000 4×: 610 → 82 MB allocated per picture, the same time on the CPU (the GPU wasn't timed). Mac: check for the same per-tile copies.
+- Windows only: the Explorer selection's COM objects are released right after reading it, instead of waiting for a garbage collection that may not come for days in the tray. The tests no longer write their deliberately broken `presets.json` errors into the user's `errors.log`. A LibreOffice job whose scratch folder can't be deleted yet keeps its result (or its real error) instead of failing with "access denied". Animations that kept running unseen are stopped: the "Cancel all" spinner only spins while a batch runs, a waiting file's bar is no longer in its moving (indeterminate) mode, and the welcome guide's demo pauses while the window is hidden in the tray (seen: a long-running Lemon's compositor thread busy with every window hidden; not reproduced on a fresh start, so unmeasured). Settings › Wheel redraws its preview at most once per pass of the UI thread while a slider or color picker is dragged, and the ring editor no longer rebuilds its menu on every key typed in the name. A failed blur of the wheel's backdrop frees the screenshot.
+- Windows files: `Lemon.Core/Conversion/Converters/ImageConverter.cs` (`Fits`, + test), `Lemon.App/ViewModels/QueueViewModel.cs`, `Lemon.Core/Conversion/Converters/UpscaleConverter.cs`, `Lemon.App/Wheel/ExplorerSelection.cs`, `Lemon.Core/Configuration/ErrorLog.cs`, `tests/.../TestSupport/TestLog.cs`, `Lemon.Core/Conversion/Converters/DocumentConverters.cs`, `Lemon.App/Views/ConvertPage.xaml`, `ViewModels/JobViewModel.cs` (`IsIndeterminate`), `Views/WelcomePage.xaml.cs` + `MainWindow.xaml.cs`, `Views/WheelSettingsPage.xaml.cs`, `Wheel/WheelWindow.xaml.cs` (`StartGlass`).
+
+---
+
 ## 2026-10-27: The wheel over a selection stays up; tap the key to enter, hold to close (Mac)
 
 | Windows | Mac |
 |---|---|
-| **To do** | **Done** (the original) |
+| **Done** | **Done** (the original) |
 
 - Over selected files the wheel no longer closes when the key is let go: it stays up until something is picked or it's closed. **A / W** and **D / S** light the slice (or the hub's ring) before or after the lit one, from the top and wrapping round; the pointer lights them too. A **tap of the key** (let go within 0.7 s, with no other key meanwhile), **Return** or a click enters what's lit: on the hub the ring, on a ring the slice runs. On the lemon after moving off it, a tap queues the files (or goes to the hub when the center is the way back). **Holding the key** 0.7 s closes the wheel. **Esc** inside a ring goes back to the hub; on the hub, or with no hub, it closes the wheel. A click outside closes it. Tab goes back with Shift+Tab again. Mid-drag nothing changes.
 - Not arrows: on the Mac Control + arrows switch Spaces before an app sees them; they still work with Shift as the key. On Windows, Alt + arrows are free, but the same letters keep the two apps alike.
 - Mac files: `Wheel/Wheel.swift` (`KeyTap` for tap / hold / spoiled, `WheelModel.step`, `WheelController.key`, `track`, `activate`), tests in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`, `KeyTapTests`). A key only spoils the tap when its own event has the wheel key held, so Control+D counts even if D beats the 60 Hz poll. The wheel closes when another app comes to the front (or the key tap would keep taking WASD there) and on a click or Control-click outside it; ⌘ keys always pass through.
+- Windows files: `Lemon.Core/Wheel/KeyTap.cs` (+ test), `Lemon.App/Wheel/DragGestureMonitor.cs` (the tap and its hold on the hook thread, WASD / arrows / Return, clicks on and off the wheel), `Wheel/WheelWindow.xaml.cs` (`Enter`, `Step`, `OnEscape`, `FollowPointer`), `App.xaml.cs`. Came out different on Windows: the hook sees each key event, so the tap is read from the key's own presses (no poll) and another key or a click in the press spoils it. Once the wheel is up, the wheel key's presses are swallowed, so a tap of Alt never opens Explorer's menu; the press that opened the wheel still goes through, masked as before. The arrows work with any key. WASD, the arrows and Return pass through with Ctrl or Win held (Ctrl+S, Win+D), the Windows side of "⌘ keys pass through". A click outside the wheel (any button) closes it and still reaches what's under it; the wheel closes when the Explorer window it opened over is no longer in front. Return or a tap on a chip of the mode bar turns to that ring. With Shift as the key, Shift+Tab goes back once the opening hold is over.
 
----|---|
-| **To do** | **Done** (the original) |
+---
+
+## 2026-10-27: WASD lights a slice over a selection (Mac)
+
+| Windows | Mac |
+|---|---|
+| **Done** (by the entry above, which replaces this one's "letting go of the key runs the lit slice") | **Done** (the original) |
 
 - With the wheel up over selected files (the key held, no drag), **A / W** and **D / S** light the slice before or after the lit one (from the top, wrapping round), as ⌘-Tab does with apps. Letting go of the key, or **Return** (keypad Enter too), runs the lit slice; on the hub Return opens the lit ring. Moving the pointer takes over from the keys. Mid-drag these keys do nothing new: a drop goes where the pointer is. Not the arrows, because on the Mac Control + arrows switch Spaces before an app sees them; they still work with Shift as the key. On Windows, Alt + arrows are free, so either would do, but the same letters keep the two apps alike.
 - Mac files: `Wheel/Wheel.swift` (`WheelModel.step`, `WheelController.key` (key codes A 0, S 1, D 2, W 13), `track(force:)`, `lastMouse`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`).

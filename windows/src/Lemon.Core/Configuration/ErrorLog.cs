@@ -6,7 +6,8 @@ public static class ErrorLog
     private const long MaxSize = 512 * 1024;
     private static readonly Lock Gate = new();
 
-    public static string FilePath { get; } = Path.Combine(JsonFileStore.DefaultDirectory, "errors.log");
+    /// <summary>Tests point it elsewhere, so the errors they cause on purpose stay out of the user's log.</summary>
+    public static string FilePath { get; internal set; } = Path.Combine(JsonFileStore.DefaultDirectory, "errors.log");
 
     public static void Write(string context, Exception exception)
     {
@@ -14,7 +15,7 @@ public static class ErrorLog
         {
             lock (Gate)
             {
-                Directory.CreateDirectory(JsonFileStore.DefaultDirectory);
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
                 // Keep the log small: start over once it grows past the limit.
                 if (File.Exists(FilePath) && new FileInfo(FilePath).Length > MaxSize)
                     File.Delete(FilePath);

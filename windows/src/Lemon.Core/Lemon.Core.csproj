@@ -5,9 +5,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <InternalsVisibleTo>Lemon.Core.Tests</InternalsVisibleTo>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Lemon.Core.Tests" />
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />
     <PackageReference Include="Markdig" Version="1.4.2" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />

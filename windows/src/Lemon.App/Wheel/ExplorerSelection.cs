@@ -48,39 +48,67 @@ internal static class ExplorerSelection
 
     private static List<string> Read(nint window)
     {
-        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!)!;
-        dynamic windows = shell.Windows();
-        dynamic? view = null;
-        if (Native.ClassName(window) == "CabinetWClass")
+        // Every COM object is let go before this thread ends. Idle in the tray Lemon hardly ever collects garbage, so
+        // left to the finalizer they'd keep Explorer's objects alive for days, then be released from a thread that's gone.
+        var com = new List<object>();
+        dynamic Keep(object value)
         {
-            // Every tab of a window reports the window's handle, so match the tab that's showing.
-            var tab = FindWindowEx(window, 0, "ShellTabWindowClass", null);
-            foreach (dynamic candidate in windows)
+            com.Add(value);
+            return value;
+        }
+        try
+        {
+            dynamic shell = Keep(Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!)!);
+            dynamic windows = Keep(shell.Windows());
+            dynamic? view = null;
+            if (Native.ClassName(window) == "CabinetWClass")
             {
-                if ((nint)(long)candidate.HWND == window && (tab == 0 || TabOf(candidate) == tab))
+                // Every tab of a window reports the window's handle, so match the tab that's showing.
+                var tab = FindWindowEx(window, 0, "ShellTabWindowClass", null);
+                foreach (dynamic candidate in windows)
                 {
-                    view = candidate.Document;
-                    break;
+                    Keep(candidate);
+                    if ((nint)(long)candidate.HWND == window && (tab == 0 || TabOf(candidate) == tab))
+                    {
+                        view = Keep(candidate.Document);
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                object desktop = 0 /* CSIDL_DESKTOP */, root = Type.Missing;
+                int hwnd;
+                view = Keep(Keep(windows.FindWindowSW(ref desktop, ref root, 8 /* SWC_DESKTOP */, out hwnd, 1 /* SWFO_NEEDDISPATCH */)).Document);
+            }
+
+            var paths = new List<string>();
+            if (view is null)
+                return paths;
+            foreach (dynamic item in Keep(view.SelectedItems()))
+            {
+                Keep(item);
+                // Things with no place on disk (inside a zip, This PC, Control Panel) can't be converted.
+                if (item.Path is string path && (File.Exists(path) || Directory.Exists(path)))
+                    paths.Add(path);
+            }
+            return paths;
+        }
+        finally
+        {
+            // Cleanup must never cost the selection that was read.
+            foreach (var value in com.Distinct(ReferenceEqualityComparer.Instance))
+            {
+                try
+                {
+                    if (value is not null && Marshal.IsComObject(value))
+                        Marshal.FinalReleaseComObject(value);
+                }
+                catch (Exception)
+                {
                 }
             }
         }
-        else
-        {
-            object desktop = 0 /* CSIDL_DESKTOP */, root = Type.Missing;
-            int hwnd;
-            view = windows.FindWindowSW(ref desktop, ref root, 8 /* SWC_DESKTOP */, out hwnd, 1 /* SWFO_NEEDDISPATCH */).Document;
-        }
-
-        var paths = new List<string>();
-        if (view is null)
-            return paths;
-        foreach (dynamic item in view.SelectedItems())
-        {
-            // Things with no place on disk (inside a zip, This PC, Control Panel) can't be converted.
-            if (item.Path is string path && (File.Exists(path) || Directory.Exists(path)))
-                paths.Add(path);
-        }
-        return paths;
     }
 
     /// <summary>The tab window behind one of ShellWindows' entries.</summary>

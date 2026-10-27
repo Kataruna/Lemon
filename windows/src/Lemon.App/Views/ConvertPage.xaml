@@ -242,7 +242,8 @@
                 Click="OnCancelAll"
                 Visibility="{x:Bind views:Ui.Visible(Queue.IsBusy), Mode=OneWay}" AutomationProperties.Name="Cancel all">
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <ProgressRing Width="14" Height="14" IsActive="True" />
+                    <!-- Spins only while it shows: an active ring keeps the compositor busy even when collapsed. -->
+                    <ProgressRing Width="14" Height="14" IsActive="{x:Bind Queue.IsBusy, Mode=OneWay}" />
                     <TextBlock Text="Cancel all" />
                 </StackPanel>
             </Button>

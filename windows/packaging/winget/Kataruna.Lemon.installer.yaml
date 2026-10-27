@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.12.0.schema.json
 PackageIdentifier: Kataruna.Lemon
-PackageVersion: 0.4.1
+PackageVersion: 0.5.0
 MinimumOSVersion: 10.0.19041.0
 InstallerType: inno
 Scope: user
@@ -12,7 +12,7 @@ AppsAndFeaturesEntries:
   ProductCode: '{5B8E2D47-9C1A-4F63-A2E8-7D4C1B9E3F06}_is1'
 Installers:
 - Architecture: x64
-  InstallerUrl: https://github.com/Kataruna/Lemon/releases/download/windows-v0.4.1/Lemon-0.4.1-Setup.exe
-  InstallerSha256: 3826F24E913E44A6ABE9F6FE4D6D6BAC520F618C08CDCF8C44A9ECCC2D04C080
+  InstallerUrl: https://github.com/Kataruna/Lemon/releases/download/windows-v0.5.0/Lemon-0.5.0-Setup.exe
+  InstallerSha256: 253FCBA345DF990C9503F598301D739638D3A78166C59231A7BF6298C9472A28
 ManifestType: installer
 ManifestVersion: 1.12.0

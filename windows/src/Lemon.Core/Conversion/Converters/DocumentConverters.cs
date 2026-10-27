@@ -168,7 +168,8 @@ public sealed class LibreOfficeConverter(ToolLocator tools) : IConverter
         finally
         {
             FreeProfiles.Add(slot);
-            try { scratch.Delete(recursive: true); } catch (IOException) { }
+            // A LibreOffice still letting go of the folder must not turn a finished job (or the real error) into "access denied".
+            try { scratch.Delete(recursive: true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
     }
 }

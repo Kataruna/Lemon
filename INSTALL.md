@@ -70,7 +70,7 @@ Lemon isn't code-signed yet, so the first time you run a download, Windows may s
 To check the download first, compare its SHA-256 (shown next to each file on the release page) with:
 
 ```powershell
-Get-FileHash .\Lemon-0.4.1-Setup.exe -Algorithm SHA256
+Get-FileHash .\Lemon-0.5.0-Setup.exe -Algorithm SHA256
 ```
 
 ### First steps on Windows
@@ -78,7 +78,7 @@ Get-FileHash .\Lemon-0.4.1-Setup.exe -Algorithm SHA256
 The first time Lemon opens, a short welcome guide asks what you want to convert besides pictures (each kind of file has an **Add** button that installs its converter with `winget`), then shows how to open the wheel. Skip it if you like; *Settings › About › Show the welcome guide again* brings it back.
 
 - **Convert a batch:** drop files or folders onto the window (or click *Add files*), pick a preset for each file or use *Set all to*, then click **Convert**. Files are saved next to the originals; *Settings › Output* can send them to a folder instead.
-- **Use the wheel:** with Lemon running (minimized or in the notification area is fine), start dragging files anywhere, then **shake the mouse** or press **Alt**. Drop on a format, or on the lemon to queue the files. Or select files in File Explorer, **hold Alt**, point at a format and let go.
+- **Use the wheel:** with Lemon running (minimized or in the notification area is fine), start dragging files anywhere, then **shake the mouse** or press **Alt**. Drop on a format, or on the lemon to queue the files. Or select files in File Explorer and **hold Alt** until the wheel opens; then point at a format (or use **A** / **D**) and **tap Alt**, press **Enter** or click. Hold Alt again or press Esc to close it.
 - **Closing the window** keeps Lemon in the notification area (the lemon by the clock), so the wheel keeps working. Right-click that lemon to quit.
 
 ### Converters on Windows
