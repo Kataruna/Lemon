@@ -517,6 +517,10 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private var movedOff = false
     /// Where the pointer was at the last look: it only takes over from the arrow keys once it moves.
     private var lastMouse: NSPoint?
+    /// The wheel stays up over a selection once the key is let go. Then a tap of the key enters what's lit and holding
+    /// it closes the wheel. `armed`: the key has been let go since the wheel opened (the hold that opened it isn't a tap).
+    /// `pressedAt`: when the key went down. `spoiled`: another key went with it (Control+W), so it isn't a tap.
+    private var armed = false, pressedAt: Date?, spoiled = false
 
     func start() {
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel]) { [weak self] e in
@@ -532,7 +536,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
             let picked = MainActor.assumeIsolated { () -> Bool in
                 guard let self, self.selection != nil, self.panel?.isVisible == true else { return false }
-                self.track(force: true); self.release(); return true
+                self.track(force: true); self.activate(); return true
             }
             return picked ? nil : e
         }
@@ -581,6 +585,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             swallowingEscape = false; syncTap(); return true
         }
         guard NSEvent.pressedMouseButtons & 1 != 0 || selection != nil else { return false }
+        if pressedAt != nil { spoiled = true }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
         guard panel?.isVisible == true else {
             let p = PrefStore.shared.p
@@ -592,17 +597,16 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         switch code {
         case 53:
             // Esc: the drag sees none of it, so it carries on and can be dropped anywhere, or the wheel opened again.
+            // Over a selection, inside a ring it goes back to the hub; on the hub (or with none) it closes the wheel.
             swallowingEscape = true
-            if !repeating { fired = false; shake.reset(); hide() }
-        // Tab. Over a selection with Shift as the key, Shift is being held, so it always goes forward.
-        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && (selection == nil || PrefStore.shared.p.key != .shift) ? -1 : 1) }
-        // Over a selection, without the mouse: A W and D S light the slice before or after, Return (or letting go of
-        // the key) runs it; on the hub, Return opens the lit ring. Not mid-drag: a drop goes where the pointer is.
+            if repeating { break }
+            if selection != nil, model.hubOn, !model.inHub { model.go(number: 0) } else { fired = false; shake.reset(); hide() }
+        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) ? -1 : 1) }   // Tab
+        // Over a selection, without the mouse: A W and D S light the slice (or the hub's ring) before or after; a tap of
+        // the key or Return enters it. Not mid-drag: a drop goes where the pointer is.
         // WASD because Control + arrows switch Spaces before Lemon sees them; the arrows still work with Shift.
         case let k where selection != nil && [0, 13, 1, 2, 123, 126, 124, 125].contains(k): model.step([1, 2, 124, 125].contains(k) ? 1 : -1)
-        case let k where selection != nil && (k == 36 || k == 76):
-            if repeating { break }
-            if model.inHub, let m = model.hoveredMode { model.go(m) } else { release() }
+        case let k where selection != nil && (k == 36 || k == 76): if !repeating { activate() }
         case let k:
             // Key codes for 0...9 on the number row.
             guard let n = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25].firstIndex(of: k) else { return false }
@@ -670,7 +674,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             let urls = wheelItems(await finderSelection())
             guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(flag), NSEvent.pressedMouseButtons == 0 else { return }
             hold = nil
-            selection = urls; movedOff = false; lastMouse = nil
+            selection = urls; movedOff = false; lastMouse = nil; armed = false; pressedAt = nil
             show(urls)
             guard panel?.isVisible == true else { selection = nil; return }
             follow = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { WheelController.shared.track() } }
@@ -716,7 +720,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         return out.split(separator: "\n").filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: String($0)) }
     }
 
-    /// Follows the pointer for the wheel over a selection, and picks when the key is let go.
+    /// Follows the pointer and the key for the wheel over a selection: a tap enters what's lit, a hold closes the wheel.
     private func track(force: Bool = false) {
         guard selection != nil, let panel, panel.isVisible else { hide(); return }
         let m = NSEvent.mouseLocation, f = panel.frame
@@ -725,15 +729,26 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
             if !model.lemonHot { movedOff = true }
         }
-        if !NSEvent.modifierFlags.contains(PrefStore.shared.p.key.flag ?? []) { release() }
+        guard let flag = PrefStore.shared.p.key.flag else { return }
+        let held = NSEvent.modifierFlags.contains(flag)
+        if !held {
+            if pressedAt != nil, !spoiled { pressedAt = nil; activate(); return }
+            pressedAt = nil; armed = true
+        } else if armed {
+            if pressedAt == nil { pressedAt = Date(); spoiled = false }
+            else if !spoiled, Date().timeIntervalSince(pressedAt!) >= 0.7 { hide() }   // held as long as the hold that opened it
+        }
     }
 
-    /// Let go on a slice: run it. On the lemon after moving off it: queue the files. Anywhere else: close.
-    private func release() {
+    /// Enters what's lit: a ring on the hub, or runs a slice. The lemon (after moving off it) queues the files, or with
+    /// the center as the way back, goes to the hub.
+    private func activate() {
         guard let urls = selection else { return }
-        let target = model.hovered, queue = model.lemonHot && !model.centerBack && movedOff
-        model.clearHover()
-        if let target { pick(target, urls) } else if queue { queueIt(urls) } else { hide() }
+        if model.inHub { if let m = model.hoveredMode { model.go(m) }; return }
+        if let target = model.hovered { model.clearHover(); pick(target, urls) }
+        else if model.lemonHot, movedOff {
+            if model.centerBack { model.go(number: 0) } else { model.clearHover(); queueIt(urls) }
+        }
     }
 
     private func show(_ urls: [URL], links: [URL] = []) {
@@ -775,6 +790,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     private func hide() {
+        armed = false; pressedAt = nil
         selection = nil; follow?.invalidate(); follow = nil
         panel?.orderOut(nil)
         syncTap()

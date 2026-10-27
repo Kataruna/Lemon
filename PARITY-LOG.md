@@ -11,10 +11,17 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
-## 2026-10-27: WASD picks a slice over a selection
+## 2026-10-27: The wheel over a selection stays up; tap the key to enter, hold to close (Mac)
 
 | Windows | Mac |
 |---|---|
+| **To do** | **Done** (the original) |
+
+- Over selected files the wheel no longer closes when the key is let go: it stays up until something is picked or it's closed. **A / W** and **D / S** light the slice (or the hub's ring) before or after the lit one, from the top and wrapping round; the pointer lights them too. A **tap of the key** (let go within 0.7 s, with no other key meanwhile), **Return** or a click enters what's lit: on the hub the ring, on a ring the slice runs. On the lemon after moving off it, a tap queues the files (or goes to the hub when the center is the way back). **Holding the key** 0.7 s closes the wheel. **Esc** inside a ring goes back to the hub; on the hub, or with no hub, it closes the wheel. A click outside closes it. Tab goes back with Shift+Tab again. Mid-drag nothing changes.
+- Not arrows: on the Mac Control + arrows switch Spaces before an app sees them; they still work with Shift as the key. On Windows, Alt + arrows are free, but the same letters keep the two apps alike.
+- Mac files: `Wheel/Wheel.swift` (`WheelModel.step`, `WheelController.key`, `track`, `activate`, `armed` / `pressedAt` / `spoiled`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`).
+
+---|---|
 | **To do** | **Done** (the original) |
 
 - With the wheel up over selected files (the key held, no drag), **A / W** and **D / S** light the slice before or after the lit one (from the top, wrapping round), as ⌘-Tab does with apps. Letting go of the key, or **Return** (keypad Enter too), runs the lit slice; on the hub Return opens the lit ring. Moving the pointer takes over from the keys. Mid-drag these keys do nothing new: a drop goes where the pointer is. Not the arrows, because on the Mac Control + arrows switch Spaces before an app sees them; they still work with Shift as the key. On Windows, Alt + arrows are free, so either would do, but the same letters keep the two apps alike.
