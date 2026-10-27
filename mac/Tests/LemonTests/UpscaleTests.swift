@@ -14,8 +14,8 @@ final class UpscaleTests: XCTestCase {
             } } }
             return out
         }
-        for scale in [2, 4] {
-            let got = try Upscale.tiled(src, w, h, scale: scale, model: nearest)
+        for (scale, tile) in [(2, 256), (4, 256), (4, 128)] {
+            let got = try Upscale.tiled(src, w, h, scale: scale, tile: tile, model: nearest)
             var want = [UInt8](repeating: 0, count: w * scale * h * scale * 3)
             for y in 0..<(h * scale) { for x in 0..<(w * scale) { for c in 0..<3 {
                 want[(y * w * scale + x) * 3 + c] = src[((y / scale) * w + x / scale) * 3 + c]

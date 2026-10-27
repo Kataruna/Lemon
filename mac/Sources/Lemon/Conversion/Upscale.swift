@@ -8,7 +8,10 @@ enum Upscale {
     /// The networks always enlarge 4×; for 2× each tile's result is halved.
     static let netScale = 4
     /// The model sees the picture in tiles of this size, so its memory stays the same whatever the picture's size.
-    static let tile = 256
+    /// x4plus takes smaller ones. Measured on an M2 Pro (1000x1000 photo, 4x, peak memory of the child):
+    /// General 256 px 4.7 s / 1.8 GB, 128 px 9.2 s / 0.7 GB; x4plus 256 px 24.6 s / 4.4 GB, 128 px 27.7 s / 1.6 GB;
+    /// 512 px was no faster for either and took 6 and 15 GB.
+    static func tile(_ m: AIModel) -> Int { m.upscaler == .full ? 128 : 256 }
     /// Context around each tile that's cropped off its result, so the seams between tiles don't show.
     static let pad = 16
     /// Longest side of a result: WebP's limit, and it keeps the result's pixels around 1 GB.
@@ -59,33 +62,42 @@ enum Upscale {
         let base = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         // Straight (not premultiplied) colors: premultiplied ones are darker where the picture is see-through, and the
         // model would draw that in as halos.
-        let rgba = render(base, w, h, space)
-        var rgb = [UInt8](repeating: 0, count: w * h * 3)
-        for i in 0..<(w * h) { rgb[i * 3] = rgba[i * 4]; rgb[i * 3 + 1] = rgba[i * 4 + 1]; rgb[i * 3 + 2] = rgba[i * 4 + 2] }
+        // Each buffer lives only as long as it's needed: at the size cap a result is about 1 GB per copy.
+        let rgb: [UInt8] = {
+            let rgba = render(base, w, h, space)
+            var rgb = [UInt8](repeating: 0, count: w * h * 3)
+            for i in 0..<(w * h) { rgb[i * 3] = rgba[i * 4]; rgb[i * 3 + 1] = rgba[i * 4 + 1]; rgb[i * 3 + 2] = rgba[i * 4 + 2] }
+            return rgb
+        }()
 
         ModelRunner.runLock.lock()
-        let result: [UInt8]
+        var result: [UInt8]
         do {
             defer { ModelRunner.runLock.unlock() }
-            result = try tiled(rgb, w, h, scale: scale, progress: { progress(0.05 + 0.85 * $0) }) { input, tw, th in
+            result = try tiled(rgb, w, h, scale: scale, tile: tile(m), progress: { progress(0.05 + 0.85 * $0) }) { input, tw, th in
                 try ModelRunner.predict(ModelRunner.session(m), input, shape: [1, 3, th, tw])
             }
         }
 
-        // Transparency is the original's alpha enlarged with Lanczos; the model only does colors.
-        let ow = w * scale, oh = h * scale
+        // Straight into the Data the CGImage reads, so it isn't copied once more.
+        let ow = w * scale, oh = h * scale, n = ow * oh
         let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] ?? [:]
         let alpha = props[kCGImagePropertyHasAlpha] as? Bool ?? false
-        let big = alpha ? render(base.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]), ow, oh, space) : nil
-        var out = [UInt8](repeating: 255, count: ow * oh * 4)
-        for i in 0..<(ow * oh) {
-            out[i * 4] = result[i * 3]; out[i * 4 + 1] = result[i * 3 + 1]; out[i * 4 + 2] = result[i * 3 + 2]
-            if let big { out[i * 4 + 3] = big[i * 4 + 3] }
+        var out = Data(repeating: 255, count: n * 4)
+        out.withUnsafeMutableBytes { (o: UnsafeMutableRawBufferPointer) in
+            for i in 0..<n { o[i * 4] = result[i * 3]; o[i * 4 + 1] = result[i * 3 + 1]; o[i * 4 + 2] = result[i * 3 + 2] }
+        }
+        result = []
+        // Transparency is the original's alpha enlarged with Lanczos; the model only does colors.
+        if alpha {
+            let big = render(base.applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1]), ow, oh, space)
+            out.withUnsafeMutableBytes { (o: UnsafeMutableRawBufferPointer) in for i in 0..<n { o[i * 4 + 3] = big[i * 4 + 3] } }
         }
         progress(0.93)
-        guard let picture = CGImage(width: ow, height: oh, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: ow * 4, space: space,
+        guard let provider = CGDataProvider(data: out as CFData),
+              let picture = CGImage(width: ow, height: oh, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: ow * 4, space: space,
                                     bitmapInfo: CGBitmapInfo(rawValue: (alpha ? CGImageAlphaInfo.last : .noneSkipLast).rawValue),
-                                    provider: CGDataProvider(data: Data(out) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+                                    provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
         else { throw LemonError(message: "Upscaling failed.") }
         try write(picture, props, to: dst, e)
         progress(1)
@@ -123,7 +135,7 @@ enum Upscale {
 
     /// Runs `model` tile by tile over interleaved RGB bytes and returns the enlarged RGB bytes. `model` takes planar
     /// RGB 0...1 of tw × th and returns planar RGB 4× as large.
-    static func tiled(_ src: [UInt8], _ width: Int, _ height: Int, scale: Int,
+    static func tiled(_ src: [UInt8], _ width: Int, _ height: Int, scale: Int, tile: Int = 256,
                       progress: (Double) -> Void = { _ in }, model: ([Float], Int, Int) throws -> [Float]) throws -> [UInt8] {
         // Every tile has the same shape (edge tiles are moved inward), so the runtime doesn't re-plan per tile.
         let tw = min(tile + 2 * pad, width), th = min(tile + 2 * pad, height)

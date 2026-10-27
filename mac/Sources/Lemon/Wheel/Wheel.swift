@@ -530,7 +530,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             MainActor.assumeIsolated { self?.holdEvent(e) }
         }
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] e in
-            Task { @MainActor in try? await Task.sleep(nanoseconds: 200_000_000); if self?.down == false { self?.hide() } }; return e
+            // Not over a selection: that wheel stays up between clicks (entering a ring is a click).
+            Task { @MainActor in try? await Task.sleep(nanoseconds: 200_000_000); if self?.down == false, self?.selection == nil { self?.hide() } }; return e
         }
         // A click on the wheel picks, as letting go of the key does.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
@@ -585,6 +586,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             swallowingEscape = false; syncTap(); return true
         }
         guard NSEvent.pressedMouseButtons & 1 != 0 || selection != nil else { return false }
+        // ⌘-Tab, ⌘W and the like belong to the system and the apps.
+        guard !e.flags.contains(.maskCommand) else { return false }
         if pressedAt != nil { spoiled = true }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
         guard panel?.isVisible == true else {
@@ -662,6 +665,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
 
     /// The key (Control or Shift) alone, with Finder in front and no button down, starts the hold; anything else cancels it.
     private func holdEvent(_ e: NSEvent) {
+        // A right-click (Control-click) elsewhere closes the wheel, as a click does.
+        if selection != nil, e.type == .rightMouseDown || e.type == .otherMouseDown { hide(); return }
         let p = PrefStore.shared.p
         guard let flag = p.key.flag, e.type == .flagsChanged, e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == flag,
               p.onKey, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
@@ -678,6 +683,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             show(urls)
             guard panel?.isVisible == true else { selection = nil; return }
             follow = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { WheelController.shared.track() } }
+            follow?.tolerance = 0.005
         }
     }
 
@@ -686,7 +692,10 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     /// Whether a text field has the keyboard focus (needs Accessibility, which the wheel's keys already ask for).
     private func typing() -> Bool {
         var focused: CFTypeRef?, role: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+        // On the main thread: a hung Finder mustn't hold Lemon up for AX's default 6 s.
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.25)
+        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused, AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success else { return false }
         return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role as? String ?? "")
     }
@@ -722,7 +731,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
 
     /// Follows the pointer and the key for the wheel over a selection: a tap enters what's lit, a hold closes the wheel.
     private func track(force: Bool = false) {
-        guard selection != nil, let panel, panel.isVisible else { hide(); return }
+        // Another app in front (⌘-Tab, a click in the Dock): close, or the key tap would keep taking WASD there.
+        guard selection != nil, let panel, panel.isVisible,
+              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { hide(); return }
         let m = NSEvent.mouseLocation, f = panel.frame
         if force || m != lastMouse {
             lastMouse = m

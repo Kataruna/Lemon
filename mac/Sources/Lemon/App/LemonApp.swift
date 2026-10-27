@@ -578,11 +578,11 @@ struct ModelSettings: View {
             }
             Section {
                 models { $0.upscaler != nil }
-                if let e = store.error { Text(e).foregroundStyle(.red).font(.caption) }
             } header: { Text("Upscale") } footer: {
                 Text("Real-ESRGAN puts 2× and 4× on the Resize ring once downloaded. The models run on this Mac, are checked against a pinned SHA-256 and are stored in Application Support/Lemon/models.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if let e = store.error { Section { Text(e).foregroundStyle(.red).font(.caption) } }
         }
         .settingsPage()
     }

@@ -88,7 +88,7 @@ enum ModelRunner {
         lock.lock(); defer { lock.unlock() }
         lastUse = Date()
         if let s = sessions[m.file] { return s }
-        if env == nil { env = try ORTEnv(loggingLevel: .warning) }
+        if env == nil { env = try ORTEnv(loggingLevel: .error) }
         let options = try ORTSessionOptions()
         // Performance cores only: the efficiency cores finish their share last and hold up every layer
         // (measured: Lite 3.1 s on the 6 P-cores vs 3.4 s with ORT's default of all 10 cores, 3.8 s on 12 threads).
