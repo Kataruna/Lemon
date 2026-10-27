@@ -575,8 +575,10 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
                                 callback: { _, type, event, _ in
             MainActor.assumeIsolated {
                 let me = WheelController.shared
+                // Only switched back on if it should be on. Switching it off from here raised this again at once, round and
+                // round: ~45% CPU with the wheel closed.
                 if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-                    me.syncTap()
+                    if me.tapOn, let tap = me.tap { CGEvent.tapEnable(tap: tap, enable: true) }
                     return Unmanaged.passUnretained(event)
                 }
                 return me.key(event, up: type == .keyUp) ? nil : Unmanaged.passUnretained(event)
@@ -592,8 +594,14 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private func syncTap() {
         let p = PrefStore.shared.p, keyOpens = down && p.onKey && !p.key.held
         if keyOpens { installKeyTap() }   // in case permission was granted since launch
-        if let tap { CGEvent.tapEnable(tap: tap, enable: panel?.isVisible == true || keyOpens || swallowingEscape) }
+        let on = panel?.isVisible == true || keyOpens || swallowingEscape
+        // Every click calls this; telling the window server only when it changes saves a round trip each time.
+        guard let tap, on != tapOn else { return }
+        tapOn = on
+        CGEvent.tapEnable(tap: tap, enable: on)
     }
+    /// What the tap was last set to (it starts on when created).
+    private var tapOn = true
 
     /// Tab / Shift+Tab cycle the rings, 1–9 jump to one, 0 to the hub, Esc closes the wheel but keeps the drag going.
     /// Without the wheel up, the wheel's key opens it. Returns true to swallow the key. Only mid-drag, so these keys
