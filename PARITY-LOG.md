@@ -11,14 +11,14 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
-## 2026-10-27: Arrow keys pick a slice over a selection
+## 2026-10-27: WASD picks a slice over a selection
 
 | Windows | Mac |
 |---|---|
 | **To do** | **Done** (the original) |
 
-- With the wheel up over selected files (the key held, no drag), **← / ↑** and **→ / ↓** light the slice before or after the lit one (from the top, wrapping round), as ⌘-Tab does with apps. Letting go of the key, or **Return** (keypad Enter too), runs the lit slice; on the hub Return opens the lit ring. Moving the pointer takes over from the keys. Mid-drag the arrows do nothing new: a drop goes where the pointer is.
-- Mac files: `Wheel/Wheel.swift` (`WheelModel.step`, `WheelController.key`, `track(force:)`, `lastMouse`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`).
+- With the wheel up over selected files (the key held, no drag), **A / W** and **D / S** light the slice before or after the lit one (from the top, wrapping round), as ⌘-Tab does with apps. Letting go of the key, or **Return** (keypad Enter too), runs the lit slice; on the hub Return opens the lit ring. Moving the pointer takes over from the keys. Mid-drag these keys do nothing new: a drop goes where the pointer is. Not the arrows, because on the Mac Control + arrows switch Spaces before an app sees them; they still work with Shift as the key. On Windows, Alt + arrows are free, so either would do, but the same letters keep the two apps alike.
+- Mac files: `Wheel/Wheel.swift` (`WheelModel.step`, `WheelController.key` (key codes A 0, S 1, D 2, W 13), `track(force:)`, `lastMouse`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`).
 
 ---
 

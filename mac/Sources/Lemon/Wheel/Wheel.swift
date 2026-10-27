@@ -596,9 +596,10 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             if !repeating { fired = false; shake.reset(); hide() }
         // Tab. Over a selection with Shift as the key, Shift is being held, so it always goes forward.
         case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && (selection == nil || PrefStore.shared.p.key != .shift) ? -1 : 1) }
-        // Over a selection, without the mouse: ← ↑ and → ↓ light the slice before or after, Return (or letting go of
+        // Over a selection, without the mouse: A W and D S light the slice before or after, Return (or letting go of
         // the key) runs it; on the hub, Return opens the lit ring. Not mid-drag: a drop goes where the pointer is.
-        case let k where selection != nil && [123, 124, 125, 126].contains(k): model.step(k == 124 || k == 125 ? 1 : -1)
+        // WASD because Control + arrows switch Spaces before Lemon sees them; the arrows still work with Shift.
+        case let k where selection != nil && [0, 13, 1, 2, 123, 126, 124, 125].contains(k): model.step([1, 2, 124, 125].contains(k) ? 1 : -1)
         case let k where selection != nil && (k == 36 || k == 76):
             if repeating { break }
             if model.inHub, let m = model.hoveredMode { model.go(m) } else { release() }
