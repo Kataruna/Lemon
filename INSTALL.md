@@ -148,16 +148,16 @@ You only do this once per version.
 
 ### Accessibility permission
 
-Lemon asks for **Accessibility** access (*System Settings › Privacy & Security › Accessibility*). It's only used for keys while you drag: Tab, the number keys and Esc on the wheel, and a wheel key other than Shift; and for holding Shift over files selected in Finder. Shaking and holding Shift mid-drag work without it, and so do scrolling and the ring names under the wheel.
+Lemon asks for **Accessibility** access (*System Settings › Privacy & Security › Accessibility*). It's only used for keys while you drag: Tab, the number keys and Esc on the wheel, and a wheel key other than Control or Shift; and for holding the key over files selected in Finder. Shaking and holding Control or Shift mid-drag work without it, and so do scrolling and the ring names under the wheel.
 
-Holding Shift over a Finder selection also asks once whether Lemon may control **Finder** (*Privacy & Security › Automation*): that's how Lemon reads which files are selected.
+Holding the key over a Finder selection also asks once whether Lemon may control **Finder** (*Privacy & Security › Automation*): that's how Lemon reads which files are selected.
 
 ### First steps on Mac
 
 The first time Lemon opens, a welcome guide lists the kinds of files it converts. Each one shows **Ready**, or an **Add** button that installs its converter with Homebrew in a Terminal window (or *Get it…*, which opens [brew.sh](https://brew.sh) when Homebrew isn't installed). Then an animation on the real wheel shows how to use it. **Skip** is at the top right; *Settings › About › Show the welcome guide again* brings it back.
 
 - **Convert a batch:** drop files or folders onto the window (or *Choose Files…*), pick a preset per file or use *Set all to* in the toolbar, then click **Convert**.
-- **Use the wheel:** start dragging files from Finder or anywhere, then **shake the mouse** or **hold Shift**. Drop on a format, or on the lemon to queue the files. Or select files in Finder, **hold Shift**, point at a format and let go.
+- **Use the wheel:** start dragging files from Finder or anywhere, then **shake the mouse** or **hold Control**. Drop on a format, or on the lemon to queue the files. Or select files in Finder, **hold Control**, point at a format and let go.
 - **Closing the window** keeps Lemon in the menu bar (the lemon icon), so the wheel keeps working. Quit from that menu.
 
 ### Converters on Mac

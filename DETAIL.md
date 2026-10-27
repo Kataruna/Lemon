@@ -34,10 +34,10 @@ A shake is four quick direction changes, each a real swing (at least 40 px), wit
 
 | | Windows | Mac |
 |---|---|---|
-| Default key | **Alt**, pressed (until 0.4.1: Space, which moves to Alt once) | **Shift**, held |
-| Other keys | Any key except Esc, Ctrl, Win and 0–9 (Shift works) | Any key except Esc, Tab, 0–9, ⌘ ⌥ ⌃ and Fn; pressed once |
-| How keys are read | A low-level keyboard hook | An event tap, only while the mouse button is down; needs Accessibility permission (holding Shift doesn't) |
-| Without a drag | Hold the key over files selected in File Explorer (below) | Hold Shift over files selected in Finder (below); only with Shift as the key |
+| Default key | **Alt**, pressed (until 0.4.1: Space, which moves to Alt once) | **Control**, held (until 0.5.0: Shift, which moves to Control) |
+| Other keys | Any key except Esc, Ctrl, Win and 0–9 (Shift works) | Shift (held), or any key except Esc, Tab, 0–9, ⌘ ⌥ and Fn, pressed once |
+| How keys are read | A low-level keyboard hook | An event tap, only while the mouse button is down; needs Accessibility permission (holding Control or Shift doesn't) |
+| Without a drag | Hold the key over files selected in File Explorer (below) | Hold the key over files selected in Finder (below); only with Control or Shift as the key |
 
 **Selected files.** Select files or folders in File Explorer or on the desktop (Finder on the Mac), then hold the wheel key on its own for 0.7 s, and the wheel opens under the pointer for them:
 
@@ -46,7 +46,7 @@ A shake is four quick direction changes, each a real swing (at least 40 px), wit
 - Pressing any other key, a mouse button or scrolling while holding means the key was a modifier (Shift+click, Alt+F4…), so the wheel doesn't open. Nor does it while you're renaming a file.
 - With Alt, letting go doesn't open Explorer's menu: Lemon slips a key that does nothing in between, as launchers do. Tab while the wheel is up turns the ring rather than opening the Alt+Tab switcher.
 - Only File Explorer and the desktop share what's selected; other apps don't, so the key does nothing there. Items with no place on disk (inside a zip, This PC) are left out.
-- On the Mac this works with Shift as the wheel key (another key would type into Finder), and it reads Finder's selection by asking Finder, so macOS asks once whether Lemon may control Finder. Tab always goes forward there, since Shift is held.
+- On the Mac this works with Control or Shift as the wheel key (another key would type into Finder), and it reads Finder's selection by asking Finder, so macOS asks once whether Lemon may control Finder. With Shift as the key, Tab always goes forward there, since Shift is held.
 
 When a drag starts on a folder, Lemon looks inside it (on the Mac, the first 5,000 entries) to offer the right formats. Packages such as an app or a Photos library count as one item.
 

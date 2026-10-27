@@ -11,6 +11,17 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-27: Control is the Mac's wheel key
+
+| Windows | Mac |
+|---|---|
+| **Won't do**: Windows has its own default (Alt), and Ctrl can't be picked there | **Done** (the original) |
+
+- The Mac's default wheel key is now **Control**, held (was Shift). Settings saved Shift as "the default", so everyone on Shift moves to Control; Shift can still be picked, as can a pressed key. Control works like Shift did: held mid-drag, or held alone for 0.7 s over a Finder selection, read off the mouse / modifier events, no Accessibility permission needed mid-drag. Control (left or right) is no longer refused when picking a key.
+- Mac files: `Settings/Customize.swift` (`WheelKey.control`, `flag`, `held`, `Prefs.key`), `Wheel/Wheel.swift` (drag trigger, `holdEvent`, `track`, Tab), `App/Welcome.swift`.
+
+---
+
 ## 2026-10-26: Custom Resize presets (keep the format)
 
 | Windows | Mac |

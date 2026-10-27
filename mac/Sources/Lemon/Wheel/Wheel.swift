@@ -498,9 +498,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     /// Esc went down on the wheel and was swallowed: its key-up is swallowed too.
     private var swallowingEscape = false
     private let pb = NSPasteboard(name: .drag)
-    /// Shift held alone over Finder: the wait before its selection opens the wheel.
+    /// The wheel key (Control or Shift) held alone over Finder: the wait before its selection opens the wheel.
     private var hold: Task<Void, Never>?
-    /// The Finder selection the wheel is up for (nil in a drag), the timer that follows the pointer and Shift for it,
+    /// The Finder selection the wheel is up for (nil in a drag), the timer that follows the pointer and the key for it,
     /// and whether the pointer has left the lemon (letting go there only queues the files after that).
     private var selection: [URL]?
     private var follow: Timer?
@@ -516,7 +516,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] e in
             Task { @MainActor in try? await Task.sleep(nanoseconds: 200_000_000); if self?.down == false { self?.hide() } }; return e
         }
-        // A click on the wheel picks, as letting go of Shift does.
+        // A click on the wheel picks, as letting go of the key does.
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
             let picked = MainActor.assumeIsolated { () -> Bool in
                 guard let self, self.selection != nil, self.panel?.isVisible == true else { return false }
@@ -552,9 +552,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     /// Every keystroke on the Mac waits on an enabled tap, so it's only on while the wheel is up, or mid-press when a
-    /// key other than Shift opens the wheel.
+    /// key other than Control or Shift opens the wheel.
     private func syncTap() {
-        let p = PrefStore.shared.p, keyOpens = down && p.onKey && p.key != .shift
+        let p = PrefStore.shared.p, keyOpens = down && p.onKey && !p.key.held
         if keyOpens { installKeyTap() }   // in case permission was granted since launch
         if let tap { CGEvent.tapEnable(tap: tap, enable: panel?.isVisible == true || keyOpens || swallowingEscape) }
     }
@@ -582,8 +582,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             // Esc: the drag sees none of it, so it carries on and can be dropped anywhere, or the wheel opened again.
             swallowingEscape = true
             if !repeating { fired = false; shake.reset(); hide() }
-        // Tab. Over a selection Shift is being held, so it always goes forward.
-        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && selection == nil ? -1 : 1) }
+        // Tab. Over a selection with Shift as the key, Shift is being held, so it always goes forward.
+        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && (selection == nil || PrefStore.shared.p.key != .shift) ? -1 : 1) }
         case let k:
             // Key codes for 0...9 on the number row.
             guard let n = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25].firstIndex(of: k) else { return false }
@@ -606,9 +606,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             cancelHold()
             if panel?.isVisible == true, down || selection != nil, e.momentumPhase == [], abs(e.scrollingDeltaY) > 2 { model.cycle(e.scrollingDeltaY < 0 ? 1 : -1) }
         case .leftMouseDragged:
-            // Shake, or hold Shift like Tangerine, as Settings allows. A key other than Shift arrives through the key tap.
+            // Shake, or hold Control / Shift, as Settings allows. A key that's pressed arrives through the key tap.
             let p = PrefStore.shared.p
-            let shaken = (p.onShake && shake.add(NSEvent.mouseLocation, e.timestamp)) || (p.onKey && p.key == .shift && e.modifierFlags.contains(.shift))
+            let shaken = (p.onShake && shake.add(NSEvent.mouseLocation, e.timestamp)) || (p.onKey && p.key.flag.map(e.modifierFlags.contains) == true)
             if shaken { open() }
         default: break
         }
@@ -635,13 +635,13 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         return urls.filter { u in kindOf[ext(of: u)] != nil || u.hasDirectoryPath || fileCommands.contains { $0.takes(u) } }
     }
 
-    // MARK: Shift held over files selected in Finder
+    // MARK: the wheel key held over files selected in Finder
 
-    /// Shift alone, with Finder in front and no button down, starts the hold; anything else cancels it.
+    /// The key (Control or Shift) alone, with Finder in front and no button down, starts the hold; anything else cancels it.
     private func holdEvent(_ e: NSEvent) {
         let p = PrefStore.shared.p
-        let shiftAlone = e.type == .flagsChanged && e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == .shift
-        guard shiftAlone, p.onKey, p.key == .shift, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
+        guard let flag = p.key.flag, e.type == .flagsChanged, e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == flag,
+              p.onKey, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { cancelHold(); return }
         hold?.cancel()
         hold = Task {
@@ -649,7 +649,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             // Typing a capital in a rename or the search field isn't a hold.
             guard !Task.isCancelled, !typing() else { return }
             let urls = wheelItems(await finderSelection())
-            guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(.shift), NSEvent.pressedMouseButtons == 0 else { return }
+            guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(flag), NSEvent.pressedMouseButtons == 0 else { return }
             hold = nil
             selection = urls; movedOff = false
             show(urls)
@@ -697,13 +697,13 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         return out.split(separator: "\n").filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: String($0)) }
     }
 
-    /// Follows the pointer for the wheel over a selection, and picks when Shift is let go.
+    /// Follows the pointer for the wheel over a selection, and picks when the key is let go.
     private func track() {
         guard selection != nil, let panel, panel.isVisible else { hide(); return }
         let m = NSEvent.mouseLocation, f = panel.frame
         model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
         if !model.lemonHot { movedOff = true }
-        if !NSEvent.modifierFlags.contains(.shift) { release() }
+        if !NSEvent.modifierFlags.contains(PrefStore.shared.p.key.flag ?? []) { release() }
     }
 
     /// Let go on a slice: run it. On the lemon after moving off it: queue the files. Anywhere else: close.

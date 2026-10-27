@@ -64,35 +64,42 @@ struct Prefs: Codable, Equatable {
     var glass: GlassStyle? = nil
     var wheelOnShake: Bool? = nil       // nil = on
     var wheelOnKey: Bool? = nil         // nil = on
-    var wheelKey: WheelKey? = nil       // nil = Shift
+    var wheelKey: WheelKey? = nil       // nil = Control (Shift until 0.5.0)
     var welcomeShown: Bool? = nil
     var checkUpdates: Bool? = nil       // nil = on
 
     /// Both off can't be picked in Settings; if saved that way anyway, shaking counts as on.
     var onShake: Bool { (wheelOnShake ?? true) || !(wheelOnKey ?? true) }
     var onKey: Bool { wheelOnKey ?? true }
-    var key: WheelKey { wheelKey ?? .shift }
-    /// "shake or hold Shift", "press Space", …: how the wheel opens right now, for hints.
+    var key: WheelKey { wheelKey ?? .control }
+    /// "shake or hold Control", "press Space", …: how the wheel opens right now, for hints.
     var summon: String {
-        let k = key == .shift ? "hold Shift" : "press \(key.name)"
+        let k = key.held ? "hold \(key.name)" : "press \(key.name)"
         return onShake && onKey ? "shake or \(k)" : onShake ? "shake" : k
     }
 }
 
-/// The key that opens the wheel mid-drag. Shift is held (read off the mouse events, no permission needed); any other
+/// The key that opens the wheel mid-drag. Control or Shift is held (read off the mouse events, no permission needed); any other
 /// key is pressed, which needs the key tap and so Accessibility permission.
 struct WheelKey: Codable, Hashable {
     var code: Int64, name: String
-    static let shift = WheelKey(code: 56, name: "Shift")
-    /// Esc closes the wheel, Tab and 0–9 switch rings, and ⌘ ⌥ ⌃ change what the drag does.
-    static let taken: Set<Int64> = [53, 48, 29, 18, 19, 20, 21, 23, 22, 26, 28, 25, 55, 54, 58, 61, 59, 62, 63, 57]
+    static let shift = WheelKey(code: 56, name: "Shift"), control = WheelKey(code: 59, name: "Control")
+    /// The modifier held for Control or Shift; nil for a key that's pressed.
+    var flag: NSEvent.ModifierFlags? { self == .control ? .control : self == .shift ? .shift : nil }
+    var held: Bool { flag != nil }
+    /// Esc closes the wheel, Tab and 0–9 switch rings, and ⌘ ⌥ change what the drag does.
+    static let taken: Set<Int64> = [53, 48, 29, 18, 19, 20, 21, 23, 22, 26, 28, 25, 55, 54, 58, 61, 63, 57]
     private static let names: [Int64: String] = [49: "Space", 36: "Return", 51: "Delete", 117: "Forward Delete", 115: "Home", 119: "End",
         116: "Page Up", 121: "Page Down", 123: "←", 124: "→", 125: "↓", 126: "↑", 122: "F1", 120: "F2", 99: "F3", 118: "F4",
         96: "F5", 97: "F6", 98: "F7", 100: "F8", 101: "F9", 109: "F10", 103: "F11", 111: "F12"]
     /// The key in a keyDown or flagsChanged event, or nil if it can't open the wheel.
     init?(_ e: NSEvent) {
         let c = Int64(e.keyCode)
-        if e.type == .flagsChanged { guard c == 56 || c == 60 else { return nil }; self = .shift; return }
+        if e.type == .flagsChanged {
+            if c == 56 || c == 60 { self = .shift; return }
+            if c == 59 || c == 62 { self = .control; return }
+            return nil
+        }
         guard !Self.taken.contains(c) else { return nil }
         // Function keys and the like come through as private-use characters (U+F700 and up), so they get a number.
         let chars = e.charactersIgnoringModifiers?.uppercased() ?? ""
@@ -194,13 +201,13 @@ struct WheelTriggers: View {
             Text("You can't turn off both ways to open the wheel, so opening it by \(note) is back on.").font(.caption).foregroundStyle(.secondary)
         }
         if p.onKey {
-            LabeledContent(p.key == .shift ? "Key (hold)" : "Key") {
+            LabeledContent(p.key.held ? "Key (hold)" : "Key") {
                 Button(recording != nil ? (refused ? "Pick another key…" : "Press a key…") : p.key.name) { record() }
                     .onDisappear(perform: stop)
             }
-            if p.key != .shift, !AXIsProcessTrusted() {
+            if !p.key.held, !AXIsProcessTrusted() {
                 HStack {
-                    Text("Keys other than Shift need Accessibility permission.").font(.caption).foregroundStyle(.secondary)
+                    Text("Keys other than Control and Shift need Accessibility permission.").font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Open Accessibility Settings", action: openAccessibilitySettings).controlSize(.small)
                 }
@@ -216,7 +223,7 @@ struct WheelTriggers: View {
             if e.type == .keyDown, e.keyCode == 53 { stop(); return nil }
             if e.type == .flagsChanged, e.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty { return nil }   // a modifier let go
             guard let k = WheelKey(e) else { refused = true; return nil }
-            store.p.wheelKey = k == .shift ? nil : k
+            store.p.wheelKey = k == .control ? nil : k
             stop(); return nil
         }
     }
@@ -303,7 +310,7 @@ struct WheelSettings: View {
             Section {
                 WheelTriggers()
             } header: { Text("Opening the wheel") } footer: {
-                Text("Shift is held while dragging; any other key is pressed once. Esc closes the wheel and keeps the drag going.")
+                Text("Control or Shift is held while dragging; any other key is pressed once. Esc closes the wheel and keeps the drag going.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

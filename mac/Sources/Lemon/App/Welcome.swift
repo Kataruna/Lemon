@@ -132,7 +132,7 @@ private struct WheelDemo: View {
 
     var body: some View {
         let p = store.p, shake = p.onShake, ring = ring
-        let summon = shake ? "2. Shake" : p.key == .shift ? "2. Hold Shift" : "2. Press \(p.key.name)"
+        let summon = shake ? "2. Shake" : p.key.held ? "2. Hold \(p.key.name)" : "2. Press \(p.key.name)"
         VStack(spacing: 14) {
             TimelineView(.animation(paused: still)) { ctx in
                 scene(t: still ? nil : ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 6), shake: shake, key: p.key.name,
@@ -150,7 +150,7 @@ private struct WheelDemo: View {
             }
             if !AXIsProcessTrusted() {
                 HStack {
-                    Text("Keys on the wheel (Tab, 1–9, Esc\(p.onKey && p.key != .shift ? ", \(p.key.name)" : "")) need Lemon to be allowed in Accessibility.")
+                    Text("Keys on the wheel (Tab, 1–9, Esc\(p.onKey && !p.key.held ? ", \(p.key.name)" : "")) need Lemon to be allowed in Accessibility.")
                         .font(.callout).foregroundStyle(.secondary)
                     Button("Open Settings", action: openAccessibilitySettings).controlSize(.small)
                 }

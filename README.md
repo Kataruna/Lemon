@@ -16,7 +16,7 @@ A drag-and-drop file converter for **Windows** and **macOS**. Drop in pictures, 
 
 ## Features
 
-- **Conversion wheel.** While you drag files from anywhere (File Explorer, Finder, the desktop, a browser…), shake the mouse or press a key (Alt on Windows, Shift on Mac, or your own) and a round menu of formats opens under the pointer. You can also select files in File Explorer (hold Alt) or Finder (hold Shift). Drop on a format to convert right away; drop on the lemon in the middle to add the files to the queue. **Esc** closes the wheel without cancelling the drag.
+- **Conversion wheel.** While you drag files from anywhere (File Explorer, Finder, the desktop, a browser…), shake the mouse or press a key (Alt on Windows, Control on Mac, or your own) and a round menu of formats opens under the pointer. You can also select files in File Explorer (hold Alt) or Finder (hold Control). Drop on a format to convert right away; drop on the lemon in the middle to add the files to the queue. **Esc** closes the wheel without cancelling the drag.
 - **Rings.** The wheel has rings for *Convert*, *Optimize*, *Cut out* (remove the background) and *Resize*, plus up to five rings of your own. Switch with **Tab**, the number keys, the scroll wheel, or by resting the files on a ring's name. A hub can show all the rings at once.
 - **Commands.** Your own shell (or PowerShell) commands on a Commands ring for dragged files, folders and links: shake a project folder to open it in your terminal or editor, or a link from the browser to hand it to your own tool. See [DETAIL.md](DETAIL.md#commands).
 - **Batch queue.** Drop files or whole folders on the window, give each file its own preset (or use *Set all to*), and convert them in parallel with live progress.
@@ -39,7 +39,7 @@ The two apps are written separately (C# / WinUI 3 and Swift / SwiftUI) and share
 |---|---|---|
 | Runs on | Windows 10 (2004+) and 11, 64-bit | macOS 14 Sonoma or later, Apple silicon |
 | Lives in | The notification area (by the clock) | The menu bar |
-| Wheel key by default | Alt (pressed mid-drag, or held over files selected in File Explorer) | Shift (held) |
+| Wheel key by default | Alt (pressed mid-drag, or held over files selected in File Explorer) | Control (held mid-drag, or over files selected in Finder) |
 | Pictures | Built in (bundled ImageMagick) | ImageMagick from Homebrew |
 | Simple documents | Markdown and text built in | DOCX, ODT, RTF, HTML and text built in (`textutil`) |
 | Remove background | BiRefNet on the GPU (DirectML) or CPU | Apple Vision, or BiRefNet on the CPU |
