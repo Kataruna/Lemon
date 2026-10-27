@@ -567,42 +567,58 @@ struct MenuStatus: View {
     }
 }
 
-struct BackgroundSettings: View {
+struct ModelSettings: View {
     @ObservedObject private var store = ModelStore.shared
     var body: some View {
         Form {
             Section {
-                ForEach(BiRefNet.all, id: \.file) { m in
-                    HStack {
-                        VStack(alignment: .leading) {
-                            Text(m.name)
-                            Text(ByteCountFormatter.string(fromByteCount: m.bytes, countStyle: .file)).font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if let p = store.progress[m.file] {
-                            ProgressView(value: p).frame(width: 120)
-                            Button("Cancel") { store.cancel(m) }
-                        } else if m.installed {
-                            Label("Downloaded", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                            Button("Delete") { store.delete(m) }
-                        } else {
-                            Button("Download") { store.download(m) }
-                        }
-                    }
-                }
+                models { $0.engine != nil }
+            } header: { Text("Remove background") } footer: {
+                Text("Apple Vision is built in. BiRefNet handles large images and fine edges better.").font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                models { $0.upscaler != nil }
                 if let e = store.error { Text(e).foregroundStyle(.red).font(.caption) }
-            } header: {
-                Text("Background remover")
-            } footer: {
-                Text("Apple Vision is built in. BiRefNet runs on this Mac and handles large images and fine edges better. Models are checked against a pinned SHA-256 and stored in Application Support/Lemon/models.")
+            } header: { Text("Upscale") } footer: {
+                Text("Real-ESRGAN puts 2× and 4× on the Resize ring once downloaded. The models run on this Mac, are checked against a pinned SHA-256 and are stored in Application Support/Lemon/models.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .settingsPage()
     }
+
+    private func models(_ which: (AIModel) -> Bool) -> some View {
+        ForEach(AIModel.all.filter(which), id: \.file) { m in
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(m.name)
+                    Text("\(m.purpose) \(ByteCountFormatter.string(fromByteCount: m.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let p = store.progress[m.file] {
+                    ProgressView(value: p).frame(width: 120)
+                    Button("Cancel") { store.cancel(m) }
+                } else if m.installed {
+                    Label("Downloaded", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    Button("Delete") { store.delete(m) }
+                } else {
+                    Button("Download") { store.download(m) }
+                }
+            }
+        }
+    }
 }
 
-@main struct LemonApp: App {
+/// `Lemon --upscale …` is the child process an upscale runs in (see Upscale.child); anything else is the app.
+@main enum Entry {
+    static func main() {
+        let a = CommandLine.arguments
+        if a.count > 1, a[1] == "--upscale" { exit(Upscale.child(Array(a.dropFirst(2)))) }
+        LemonApp.main()
+    }
+}
+
+struct LemonApp: App {
     @NSApplicationDelegateAdaptor(Delegate.self) private var delegate
     var body: some Scene {
         Window("Lemon", id: "main") { ContentView().modifier(Themed()) }.defaultSize(width: 760, height: 680)

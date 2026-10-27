@@ -18,7 +18,7 @@ Lemon is on the [Releases page](https://github.com/Kataruna/Lemon/releases). Win
   - [Accessibility permission](#accessibility-permission)
   - [First steps](#first-steps-on-mac)
   - [Converters](#converters-on-mac)
-  - [Remove background models](#remove-background-models-on-mac)
+  - [AI models](#ai-models-on-mac)
   - [Updating and uninstalling](#updating-and-uninstalling-on-mac)
 - [Troubleshooting](#troubleshooting)
 
@@ -148,14 +148,16 @@ You only do this once per version.
 
 ### Accessibility permission
 
-Lemon asks for **Accessibility** access (*System Settings › Privacy & Security › Accessibility*). It's only used for keys while you drag: Tab, the number keys and Esc on the wheel, and a wheel key other than Shift. Shaking and holding Shift work without it, and so do scrolling and the ring names under the wheel.
+Lemon asks for **Accessibility** access (*System Settings › Privacy & Security › Accessibility*). It's only used for keys while you drag: Tab, the number keys and Esc on the wheel, and a wheel key other than Shift; and for holding Shift over files selected in Finder. Shaking and holding Shift mid-drag work without it, and so do scrolling and the ring names under the wheel.
+
+Holding Shift over a Finder selection also asks once whether Lemon may control **Finder** (*Privacy & Security › Automation*): that's how Lemon reads which files are selected.
 
 ### First steps on Mac
 
 The first time Lemon opens, a welcome guide lists the kinds of files it converts. Each one shows **Ready**, or an **Add** button that installs its converter with Homebrew in a Terminal window (or *Get it…*, which opens [brew.sh](https://brew.sh) when Homebrew isn't installed). Then an animation on the real wheel shows how to use it. **Skip** is at the top right; *Settings › About › Show the welcome guide again* brings it back.
 
 - **Convert a batch:** drop files or folders onto the window (or *Choose Files…*), pick a preset per file or use *Set all to* in the toolbar, then click **Convert**.
-- **Use the wheel:** start dragging files from Finder or anywhere, then **shake the mouse** or **hold Shift**. Drop on a format, or on the lemon to queue the files.
+- **Use the wheel:** start dragging files from Finder or anywhere, then **shake the mouse** or **hold Shift**. Drop on a format, or on the lemon to queue the files. Or select files in Finder, **hold Shift**, point at a format and let go.
 - **Closing the window** keeps Lemon in the menu bar (the lemon icon), so the wheel keeps working. Quit from that menu.
 
 ### Converters on Mac
@@ -172,9 +174,15 @@ DOCX, DOC, ODT, RTF, HTML and plain text convert between each other out of the b
 
 Formats appear as soon as their tool is found; no restart needed.
 
-### Remove background models on Mac
+### AI models on Mac
 
-*Cut out* works right away with **Apple Vision**. The BiRefNet models (better on large pictures and fine edges) are downloaded in **Settings › Background**, checked against a fixed SHA-256 and stored in `~/Library/Application Support/Lemon/models`.
+*Cut out* works right away with **Apple Vision**. The other models run on your Mac (no picture leaves it) and are downloaded in **Settings › AI models**:
+
+- **BiRefNet Lite** (224 MB) and **BiRefNet** (973 MB): remove backgrounds, better than Vision on large pictures and fine edges.
+- **Real-ESRGAN General** (5 MB): upscales 2× or 4×. Fast, good for most pictures.
+- **Real-ESRGAN x4plus** (67 MB): sharper upscaled photos, a few times slower.
+
+They're checked against a fixed SHA-256 and stored in `~/Library/Application Support/Lemon/models`. Until a model is downloaded, its choices don't appear on the wheel.
 
 ### Updating and uninstalling on Mac
 
@@ -187,5 +195,5 @@ To uninstall, quit Lemon and move Lemon.app to the Trash. To remove its data too
 - **The wheel doesn't appear.** Lemon has to be running (the lemon by the clock on Windows, in the menu bar on Mac). Check *Opening the wheel* in Settings, and that you're dragging actual files, not text or a picture from a web page. Keys are only taken over while you drag.
 - **A key on the wheel does nothing (Mac).** Lemon needs [Accessibility permission](#accessibility-permission). After allowing it, the next drag picks it up.
 - **A format is missing.** That kind of file needs one of the converters above; the welcome guide (*Settings › About*) shows which are ready.
-- **Remove background is missing.** On Windows, download a model in *Settings › AI models*. The same goes for the 2× / 4× Upscale choices on the Resize ring. On Mac, Apple Vision is always there; BiRefNet appears once downloaded.
+- **Remove background is missing.** Download a model in *Settings › AI models*. The same goes for the 2× / 4× Upscale choices on the Resize ring. On Mac, Apple Vision is always there; BiRefNet appears once downloaded.
 - **Something failed.** The file's row shows the error. On Windows, details also go to `%LOCALAPPDATA%\Lemon\errors.log`, useful to attach when [reporting an issue](https://github.com/Kataruna/Lemon/issues).

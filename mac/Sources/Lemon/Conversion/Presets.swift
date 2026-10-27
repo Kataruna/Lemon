@@ -3,6 +3,8 @@ import Foundation
 enum Kind: String, CaseIterable, Codable { case image = "Images", audio = "Audio", video = "Video", document = "Documents" }
 /// Background removal engines. Vision is built in; BiRefNet (Lite / Full, downloaded in Settings) copes with large images and fine edges.
 enum BGEngine: Hashable, Codable { case vision, lite, full }
+/// Real-ESRGAN networks: General (fast) or x4plus (best quality), both downloaded in Settings.
+enum Upscaler: Hashable, Codable { case lite, full }
 enum Strength: String, Codable { case lossless = "Lossless", balanced = "Balanced", smaller = "Smaller" }
 
 let kindOf: [String: Kind] = {
@@ -29,7 +31,9 @@ struct Preset: Identifiable, Hashable, Codable {
     var strip = false
     var removeBackground: BGEngine? = nil   // always writes a transparent PNG
     var command: String? = nil              // a WheelCommand's id: a wedge on the Commands ring, not a conversion
-    /// Resize: shrinks an image to fit maxWidth x maxHeight in its own format.
+    var upscale: Upscaler? = nil            // enlarges `scale` times with Real-ESRGAN, in the source's format
+    var scale: Int? = nil                   // 2 or 4
+    /// Resize: shrinks an image to fit maxWidth x maxHeight in its own format, or upscales it.
     var isResize: Bool { ext.isEmpty && strength == nil }
 }
 
@@ -67,6 +71,13 @@ let optimizePresets: [Preset] = [Strength.lossless, .balanced, .smaller].map {
 let resizePresets: [Preset] = [("4K", 3840), ("Full HD", 1920), ("HD", 1280), ("SD", 640)].map {
     Preset(name: "Resize – \($0.0)", ext: "", kind: .image, maxWidth: $0.1, maxHeight: $0.1)
 }
+
+/// Ring order: 4× Best, 4×, 2× Best, 2×. Each shows once its model is downloaded.
+let upscalePresets: [Preset] = [(4, Upscaler.full), (4, .lite), (2, .full), (2, .lite)].map {
+    Preset(name: "Upscale – \($0.0)×" + ($0.1 == .full ? " Full quality" : ""), ext: "", kind: .image, upscale: $0.1, scale: $0.0)
+}
+/// Formats Upscale writes: not GIF (animated, 256 colors) or ICO (256 px at most).
+let upscalable: Set<String> = ["png", "jpg", "jpeg", "webp", "avif", "heic", "heif", "bmp", "tif", "tiff"]
 
 let backgroundPresets = [
     Preset(name: "Remove background – Apple Vision", ext: "png", kind: .image, removeBackground: .vision),
@@ -107,8 +118,10 @@ func presets(for url: URL) -> [Preset] {
     let canSame = !out.isEmpty && kind != .document
     out += PrefStore.shared.p.custom.filter { c in out.contains { $0.kind == c.kind && $0.ext == c.ext } || (canSame && c.kind == kind && c.ext == same) }
     // BiRefNet presets stay hidden until their model is downloaded.
-    if kind == .image { out += backgroundPresets.filter { BiRefNet.of($0.removeBackground!)?.installed ?? true } }
-    if kind == .image, has("magick") { out += resizePresets }
+    if kind == .image { out += backgroundPresets.filter { AIModel.of($0.removeBackground!)?.installed ?? true } }
+    if upscalable.contains(src) { out += upscalePresets.filter { AIModel.of($0.upscale!).installed } }
+    // Custom Resize presets (Keep the original format) go ahead of the built-in sizes.
+    if kind == .image, has("magick") { out += PrefStore.shared.p.custom.filter(\.isResize) + resizePresets }
     if optimizable(src) { out = optimizePresets.filter { $0.strength != .lossless || ["png", "gif"].contains(src) } + out }
     return out
 }

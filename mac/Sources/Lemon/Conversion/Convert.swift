@@ -135,9 +135,10 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
     let srcExt = ext(of: src), optimize = preset.strength != nil
     let outExt = optimize || preset.isResize ? srcExt : preset.ext
     let suffix = optimize ? " (optimized)" : preset.removeBackground != nil ? " (no background)"
+        : preset.upscale != nil ? " (\(preset.scale ?? 4)×)"
         : preset.isResize ? " (\(preset.maxWidth ?? preset.maxHeight ?? 0) px)" : ""
-    // Resize only ever shrinks; re-encoding an image that already fits would just cost quality.
-    if preset.isResize, fits(src, preset) { return .alreadySmall }
+    // Resize only ever shrinks (Upscale aside); re-encoding an image that already fits would just cost quality.
+    if preset.isResize, preset.upscale == nil, fits(src, preset) { return .alreadySmall }
     let dir = src.deletingLastPathComponent()
     let scratch = scratchFolder(near: dir)
     let tmp = scratch.appendingPathComponent("lemon-\(UUID().uuidString).\(outExt)")
@@ -150,19 +151,23 @@ func convert(_ src: URL, _ preset: Preset, progress: @escaping @Sendable (Double
         let before = (try? src.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let after = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? Int.max
         guard after > 0, Double(after) <= Double(before) * 0.9 else { return .alreadyOptimized }
+    } else if let upscaler = preset.upscale {
+        let model = AIModel.of(upscaler)
+        guard model.installed else { throw LemonError(message: "Download \(model.name) in Settings first.") }
+        try await Upscale.inChild(model, src, tmp, scale: preset.scale ?? 4, progress)
     } else if let engine = preset.removeBackground {
         // Seconds of blocking work (and a wait for the one-at-a-time model lock), so on a thread of its own rather than
         // one of the few the async runtime shares between every job.
         try await offPool {
-            if let model = BiRefNet.of(engine) {
+            if let model = AIModel.of(engine) {
                 guard model.installed else { throw LemonError(message: "Download \(model.name) in Settings first.") }
-                try BiRefNetRunner.removeBackground(model, src, tmp, progress)
+                try ModelRunner.removeBackground(model, src, tmp, progress)
             } else {
                 // Vision chokes on some large images; a downloaded BiRefNet model takes over.
                 do { try removeBackground(src, tmp, progress) }
                 catch {
-                    guard let fallback = [BGEngine.lite, .full].compactMap(BiRefNet.of).first(where: \.installed) else { throw error }
-                    try BiRefNetRunner.removeBackground(fallback, src, tmp, progress)
+                    guard let fallback = [BGEngine.lite, .full].compactMap(AIModel.of).first(where: \.installed) else { throw error }
+                    try ModelRunner.removeBackground(fallback, src, tmp, progress)
                 }
             }
         }

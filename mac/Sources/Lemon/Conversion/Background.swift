@@ -3,25 +3,35 @@ import CoreImage
 import CryptoKit
 import OnnxRuntimeBindings
 
-/// The BiRefNet ONNX models (MIT licence, onnx-community on Hugging Face), pinned to a commit and a SHA-256.
-/// Same files as the Windows build (src/Lemon.Core/Models/BackgroundModel.cs); keep them in sync.
+/// The AI models, pinned to a URL and a SHA-256. Same files as the Windows build (src/Lemon.Core/Models/BackgroundModel.cs
+/// and UpscaleModel.cs); keep them in sync. BiRefNet: MIT licence, onnx-community on Hugging Face. Real-ESRGAN: the
+/// official BSD-3 weights, exported by windows/packaging/export-upscale-models.py onto Lemon's models-v1 release.
 /// Too big to ship in the app, so they're downloaded on request into ~/Library/Application Support/Lemon/models.
-struct BiRefNet {
-    let engine: BGEngine, name: String, file: String, url: URL, sha256: String, bytes: Int64
+struct AIModel {
+    var engine: BGEngine? = nil, upscaler: Upscaler? = nil
+    let name: String, purpose: String, file: String, url: URL, sha256: String, bytes: Int64
 
     static let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("Lemon/models")
 
     static let all = [
-        BiRefNet(engine: .lite, name: "BiRefNet Lite", file: "birefnet-lite.onnx",
+        AIModel(engine: .lite, name: "BiRefNet Lite", purpose: "Remove background. Fast, good for most pictures.", file: "birefnet-lite.onnx",
                  url: URL(string: "https://huggingface.co/onnx-community/BiRefNet_lite-ONNX/resolve/de15b22ba131738a16dff04aab8bdf8dc32e3ac1/onnx/model.onnx")!,
                  sha256: "5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333", bytes: 224_005_088),
-        BiRefNet(engine: .full, name: "BiRefNet", file: "birefnet.onnx",
+        AIModel(engine: .full, name: "BiRefNet", purpose: "Remove background. Finest edges. Slower.", file: "birefnet.onnx",
                  url: URL(string: "https://huggingface.co/onnx-community/BiRefNet-ONNX/resolve/534d3c82d3bb8b2f0867db6dfbc3a525b8e42f67/onnx/model.onnx")!,
                  sha256: "58f621f00f5d756097615970a88a791584600dcf7c45b18a0a6267535a1ebd3c", bytes: 972_666_916),
+        AIModel(upscaler: .lite, name: "Real-ESRGAN General", purpose: "Upscale. Fast, good for most pictures.", file: "realesrgan-general-x4v3.onnx",
+                 url: URL(string: release + "realesrgan-general-x4v3.onnx")!,
+                 sha256: "47710b200e8ea23e90cc4193bd9e6f3302f163db94865673c843dd12e2344b8a", bytes: 4_866_412),
+        AIModel(upscaler: .full, name: "Real-ESRGAN x4plus", purpose: "Upscale. Sharper detail on photos. Much slower.", file: "realesrgan-x4plus.onnx",
+                 url: URL(string: release + "realesrgan-x4plus.onnx")!,
+                 sha256: "863cc55ef1f43a851418253eb475318634993fbe8c2c3aadec3737d727296e68", bytes: 67_051_634),
     ]
+    private static let release = "https://github.com/Kataruna/Lemon/releases/download/models-v1/"
 
-    static func of(_ e: BGEngine) -> BiRefNet? { all.first { $0.engine == e } }
+    static func of(_ e: BGEngine) -> AIModel? { all.first { $0.engine == e } }
+    static func of(_ u: Upscaler) -> AIModel { all.first { $0.upscaler == u }! }
 
     var path: URL { Self.folder.appendingPathComponent(file) }
     var installed: Bool { FileManager.default.fileExists(atPath: path.path) }
@@ -55,14 +65,14 @@ private final class ProgressWatcher: NSObject, URLSessionTaskDelegate, @unchecke
     }
 }
 
-// MARK: running the model (port of BackgroundRemovalConverter.cs)
+// MARK: running the models (port of BackgroundRemovalConverter.cs)
 
-enum BiRefNetRunner {
+enum ModelRunner {
     private static let size = 1024
     private static let mean: [Float] = [0.485, 0.456, 0.406], std: [Float] = [0.229, 0.224, 0.225]
     private static let lock = NSLock()
     /// One inference at a time: a run already uses every core, so parallel runs only add memory and contention.
-    private static let runLock = NSLock()
+    static let runLock = NSLock()
     nonisolated(unsafe) private static var sessions: [String: ORTSession] = [:]
     nonisolated(unsafe) private static var env: ORTEnv?
     nonisolated(unsafe) private static var lastUse = Date()
@@ -74,7 +84,7 @@ enum BiRefNetRunner {
     // ponytail: CPU only, ~3 s per image for Lite and ~7.5 s for Full on an M2 Pro. Core ML was measured on ORT 1.24.2
     // and lost: NeuralNetwork mode hangs compiling; ML Program needs the model patched (Convs without `pads`) and then
     // loads in 66-106 s and runs 4x slower than CPU. Retry when ORT's Core ML provider handles BiRefNet's dynamic shapes.
-    private static func session(_ m: BiRefNet) throws -> ORTSession {
+    static func session(_ m: AIModel) throws -> ORTSession {
         lock.lock(); defer { lock.unlock() }
         lastUse = Date()
         if let s = sessions[m.file] { return s }
@@ -84,7 +94,14 @@ enum BiRefNetRunner {
         // (measured: Lite 3.1 s on the 6 P-cores vs 3.4 s with ORT's default of all 10 cores, 3.8 s on 12 threads).
         var pCores: Int32 = 0, len = MemoryLayout<Int32>.size
         if sysctlbyname("hw.perflevel0.physicalcpu", &pCores, &len, nil, 0) == 0, pCores > 0 { try options.setIntraOpNumThreads(pCores) }
-        let s = try ORTSession(env: env!, modelPath: m.path.path, sessionOptions: options)
+        // Real-ESRGAN runs on Core ML (GPU / Neural Engine): its tiles all have one shape, unlike BiRefNet's input (see
+        // above). Measured on an M2 Pro, 1000x1000 photo: 4x 4.6 s vs 12.7 s on the CPU, x4plus 22 s vs 211 s, output
+        // within 74 dB PSNR of the CPU's. If Core ML can't take the model, the CPU does.
+        let s: ORTSession
+        if m.upscaler != nil, let ml = try? ORTSessionOptions(),
+           (try? ml.appendCoreMLExecutionProvider(withOptionsV2: ["ModelFormat": "MLProgram", "MLComputeUnits": "ALL"])) != nil,
+           let made = try? ORTSession(env: env!, modelPath: m.path.path, sessionOptions: ml) { s = made }
+        else { s = try ORTSession(env: env!, modelPath: m.path.path, sessionOptions: options) }
         sessions[m.file] = s
         scheduleRelease()
         return s
@@ -101,12 +118,12 @@ enum BiRefNetRunner {
     }
 
     /// Drops a model's session, e.g. when its file is deleted.
-    static func release(_ m: BiRefNet) { lock.lock(); sessions[m.file] = nil; lock.unlock() }
+    static func release(_ m: AIModel) { lock.lock(); sessions[m.file] = nil; lock.unlock() }
 
     /// How long the last run of each model took here, to pace the progress bar during inference.
     nonisolated(unsafe) private static var lastRun: [String: Double] = [:]
 
-    static func removeBackground(_ m: BiRefNet, _ src: URL, _ dst: URL, _ progress: @escaping @Sendable (Double?) -> Void) throws {
+    static func removeBackground(_ m: AIModel, _ src: URL, _ dst: URL, _ progress: @escaping @Sendable (Double?) -> Void) throws {
         progress(0.02)
         guard let image = CIImage(contentsOf: src, options: [.applyOrientationProperty: true]) else { throw LemonError(message: "Couldn't read the image.") }
         let ctx = sharedCIContext, e = image.extent, n = size * size
@@ -132,7 +149,7 @@ enum BiRefNetRunner {
         timer.setEventHandler { progress(0.15 + 0.7 * min(Date().timeIntervalSince(start) / expected, 0.97)) }
         timer.resume()
         let out: [Float]
-        do { defer { timer.cancel(); runLock.unlock() }; out = try predict(session(m), input) }
+        do { defer { timer.cancel(); runLock.unlock() }; out = try predict(session(m), input, shape: [1, 3, size, size]) }
         // Idle counts from the end of a run: a long one (Full on a big queue) mustn't let the release drop the session
         // just before the next file needs it.
         lock.lock(); lastRun[m.file] = Date().timeIntervalSince(start); lastUse = Date(); lock.unlock()
@@ -151,9 +168,9 @@ enum BiRefNetRunner {
         progress(1)
     }
 
-    private static func predict(_ s: ORTSession, _ input: [Float]) throws -> [Float] {
+    static func predict(_ s: ORTSession, _ input: [Float], shape: [Int]) throws -> [Float] {
         let data = input.withUnsafeBufferPointer { NSMutableData(bytes: $0.baseAddress, length: $0.count * 4) }
-        let tensor = try ORTValue(tensorData: data, elementType: .float, shape: [1, 3, NSNumber(value: size), NSNumber(value: size)])
+        let tensor = try ORTValue(tensorData: data, elementType: .float, shape: shape.map { NSNumber(value: $0) })
         guard let inName = try s.inputNames().first, let outName = try s.outputNames().first else { throw LemonError(message: "Unexpected model.") }
         // Without this, ONNX Runtime's CPU arena keeps growing between runs (measured: 6.4 GB after one, 11 GB after two).
         let options = try ORTRunOptions()
@@ -164,7 +181,7 @@ enum BiRefNetRunner {
     }
 }
 
-// MARK: Settings › Background remover
+// MARK: Settings › AI models
 
 @MainActor final class ModelStore: ObservableObject {
     static let shared = ModelStore()
@@ -172,7 +189,7 @@ enum BiRefNetRunner {
     @Published var error: String?
     private var tasks: [String: Task<Void, Never>] = [:]
 
-    func download(_ m: BiRefNet) {
+    func download(_ m: AIModel) {
         guard tasks[m.file] == nil else { return }
         error = nil; progress[m.file] = 0
         tasks[m.file] = Task {
@@ -186,6 +203,10 @@ enum BiRefNetRunner {
             progress[m.file] = nil; tasks[m.file] = nil
         }
     }
-    func cancel(_ m: BiRefNet) { tasks[m.file]?.cancel() }
-    func delete(_ m: BiRefNet) { BiRefNetRunner.release(m); try? FileManager.default.removeItem(at: m.path); objectWillChange.send() }
+    func cancel(_ m: AIModel) { tasks[m.file]?.cancel() }
+    func delete(_ m: AIModel) {
+        ModelRunner.release(m)
+        do { try FileManager.default.removeItem(at: m.path); error = nil } catch { self.error = "Couldn't delete \(m.name): \(error.localizedDescription)" }
+        objectWillChange.send()
+    }
 }

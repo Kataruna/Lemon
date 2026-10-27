@@ -56,7 +56,7 @@ struct WheelMode: Hashable {
     var custom: CustomRing? { PrefStore.shared.p.rings?.first { $0.id == id } }
     var title: String { custom?.name ?? ["convert": "Convert", "optimize": "Optimize", "tools": "Cut out", "resize": "Resize", "commands": "Commands"][id] ?? "" }
     var symbol: String { custom?.symbol ?? ["convert": "arrow.triangle.2.circlepath", "optimize": "arrow.down.right.and.arrow.up.left", "tools": "scissors", "resize": "arrow.up.left.and.arrow.down.right", "commands": "terminal"][id] ?? "star" }
-    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background", "resize": "Shrink images", "commands": "Your commands"][id] ?? "" }
+    var detail: String { custom != nil ? "Your ring" : ["convert": "Change format", "optimize": "Make smaller", "tools": "Remove background", "resize": "Shrink or upscale images", "commands": "Your commands"][id] ?? "" }
     func holds(_ p: Preset) -> Bool {
         if let c = custom { return c.presets.contains(p.name) }
         switch self {
@@ -90,7 +90,8 @@ func wheelChoices(_ table: [(kind: Kind, presets: [Preset])], main: Kind, _ mode
     let mine = PrefStore.shared.p.slots[main], favs = mine ?? favorites[main]!
     func rank(_ p: Preset) -> Int {
         if let c = mode.custom { return c.presets.firstIndex(of: p.name) ?? 99 }
-        if mode == .resize { return -(p.maxWidth ?? 0) }   // largest first
+        // Upscale (4× Best, 4×, 2× Best, 2×), then the user's sizes, then the built-in ones from largest to smallest.
+        if mode == .resize { return upscalePresets.firstIndex(of: p) ?? resizePresets.firstIndex(of: p).map { 20 + $0 } ?? 10 }
         return mode == .tools ? [BGEngine.vision, .lite, .full].firstIndex(of: p.removeBackground!)! : optimize ? [Strength.lossless, .balanced, .smaller].firstIndex(of: p.strength!)! : favs.firstIndex(of: p.name) ?? 99
     }
     func pick(_ lists: [[Preset]]) -> [Preset] {
@@ -106,6 +107,7 @@ func wheelChoices(_ table: [(kind: Kind, presets: [Preset])], main: Kind, _ mode
 /// "MP4" over "720p small": the format over what makes the preset different.
 func wheelLabel(_ p: Preset) -> (String, String?) {
     if p.command != nil { return (p.name, nil) }
+    if let u = p.upscale { return ("\(p.scale ?? 4)×", u == .lite ? "AI upscale" : "Best quality") }
     if p.isResize, let side = p.maxWidth ?? p.maxHeight { return (String(p.name.split(separator: "–").last ?? "").trimmingCharacters(in: .whitespaces), "\(side) px") }
     if let e = p.removeBackground { return [BGEngine.vision: ("Quick", "Apple Vision"), .lite: ("Lite", "BiRefNet"), .full: ("Full", "Best quality")][e]! }
     if let s = p.strength { return (s.rawValue, [Strength.lossless: "Same pixels", .balanced: "Looks the same", .smaller: "Slightly lower quality"][s]) }
@@ -290,6 +292,8 @@ extension View {
 /// SF Symbol for a wheel segment.
 func wheelSymbol(_ p: Preset) -> String {
     if let id = p.command { return PrefStore.shared.p.commands?.first { $0.id == id }?.symbol ?? "terminal" }
+    if let u = p.upscale { return u == .lite ? "arrow.up.left.and.arrow.down.right" : "sparkles" }
+    if p.isResize { return "arrow.down.right.and.arrow.up.left" }
     if let e = p.removeBackground { return [BGEngine.vision: "scissors", .lite: "wand.and.stars", .full: "sparkles"][e]! }
     switch p.strength {
     case .lossless: return "checkmark.seal"
@@ -494,13 +498,31 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     /// Esc went down on the wheel and was swallowed: its key-up is swallowed too.
     private var swallowingEscape = false
     private let pb = NSPasteboard(name: .drag)
+    /// Shift held alone over Finder: the wait before its selection opens the wheel.
+    private var hold: Task<Void, Never>?
+    /// The Finder selection the wheel is up for (nil in a drag), the timer that follows the pointer and Shift for it,
+    /// and whether the pointer has left the lemon (letting go there only queues the files after that).
+    private var selection: [URL]?
+    private var follow: Timer?
+    private var movedOff = false
 
     func start() {
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel]) { [weak self] e in
             MainActor.assumeIsolated { self?.handle(e) }
         }
+        NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown, .rightMouseDown, .otherMouseDown]) { [weak self] e in
+            MainActor.assumeIsolated { self?.holdEvent(e) }
+        }
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] e in
             Task { @MainActor in try? await Task.sleep(nanoseconds: 200_000_000); if self?.down == false { self?.hide() } }; return e
+        }
+        // A click on the wheel picks, as letting go of Shift does.
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
+            let picked = MainActor.assumeIsolated { () -> Bool in
+                guard let self, self.selection != nil, self.panel?.isVisible == true else { return false }
+                self.track(); self.release(); return true
+            }
+            return picked ? nil : e
         }
         // Keys go to whatever app the drag started in, so reading (and swallowing) Tab/1/2/3 needs an event tap,
         // which needs Accessibility permission. Ask once; the wheel works without it, just without keys.
@@ -546,7 +568,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             guard code == 53, swallowingEscape else { return false }
             swallowingEscape = false; syncTap(); return true
         }
-        guard NSEvent.pressedMouseButtons & 1 != 0 else { return false }
+        guard NSEvent.pressedMouseButtons & 1 != 0 || selection != nil else { return false }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
         guard panel?.isVisible == true else {
             let p = PrefStore.shared.p
@@ -560,7 +582,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             // Esc: the drag sees none of it, so it carries on and can be dropped anywhere, or the wheel opened again.
             swallowingEscape = true
             if !repeating { fired = false; shake.reset(); hide() }
-        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) ? -1 : 1) }   // Tab
+        // Tab. Over a selection Shift is being held, so it always goes forward.
+        case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && selection == nil ? -1 : 1) }
         case let k:
             // Key codes for 0...9 on the number row.
             guard let n = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25].firstIndex(of: k) else { return false }
@@ -571,13 +594,17 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
 
     private func handle(_ e: NSEvent) {
         switch e.type {
-        case .leftMouseDown: down = true; fired = false; swallowingEscape = false; shake.reset(); dragCount = pb.changeCount; syncTap()
+        case .leftMouseDown:
+            cancelHold()
+            if selection != nil { hide() }
+            down = true; fired = false; swallowingEscape = false; shake.reset(); dragCount = pb.changeCount; syncTap()
         case .leftMouseUp: down = false; syncTap()
             // Not if a new drag has started meanwhile: that would close its wheel.
             Task { try? await Task.sleep(nanoseconds: 200_000_000); if !down { hide() } }
         case .scrollWheel:
             // One step per flick: ignore the momentum tail and tiny deltas.
-            if panel?.isVisible == true, down, e.momentumPhase == [], abs(e.scrollingDeltaY) > 2 { model.cycle(e.scrollingDeltaY < 0 ? 1 : -1) }
+            cancelHold()
+            if panel?.isVisible == true, down || selection != nil, e.momentumPhase == [], abs(e.scrollingDeltaY) > 2 { model.cycle(e.scrollingDeltaY < 0 ? 1 : -1) }
         case .leftMouseDragged:
             // Shake, or hold Shift like Tangerine, as Settings allows. A key other than Shift arrives through the key tap.
             let p = PrefStore.shared.p
@@ -598,10 +625,82 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             if !links.isEmpty { show([], links: links); return }
         }
         guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] else { return }
-        // Any file a command for files takes, even one Lemon can't convert.
-        let fileCommands = (PrefStore.shared.p.commands ?? []).filter { $0.on == .files }
-        let flat = urls.filter { u in kindOf[ext(of: u)] != nil || u.hasDirectoryPath || fileCommands.contains { $0.takes(u) } }
+        let flat = wheelItems(urls)
         if !flat.isEmpty { show(flat) }
+    }
+
+    /// What the wheel can do something with: convertible files, folders, and any file a command for files takes.
+    private func wheelItems(_ urls: [URL]) -> [URL] {
+        let fileCommands = (PrefStore.shared.p.commands ?? []).filter { $0.on == .files }
+        return urls.filter { u in kindOf[ext(of: u)] != nil || u.hasDirectoryPath || fileCommands.contains { $0.takes(u) } }
+    }
+
+    // MARK: Shift held over files selected in Finder
+
+    /// Shift alone, with Finder in front and no button down, starts the hold; anything else cancels it.
+    private func holdEvent(_ e: NSEvent) {
+        let p = PrefStore.shared.p
+        let shiftAlone = e.type == .flagsChanged && e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == .shift
+        guard shiftAlone, p.onKey, p.key == .shift, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
+              NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { cancelHold(); return }
+        hold?.cancel()
+        hold = Task {
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            // Typing a capital in a rename or the search field isn't a hold.
+            guard !Task.isCancelled, !typing() else { return }
+            let urls = wheelItems(await finderSelection())
+            guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(.shift), NSEvent.pressedMouseButtons == 0 else { return }
+            hold = nil
+            selection = urls; movedOff = false
+            show(urls)
+            guard panel?.isVisible == true else { selection = nil; return }
+            follow = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { WheelController.shared.track() } }
+        }
+    }
+
+    private func cancelHold() { hold?.cancel(); hold = nil }
+
+    /// Whether a text field has the keyboard focus (needs Accessibility, which the wheel's keys already ask for).
+    private func typing() -> Bool {
+        var focused: CFTypeRef?, role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let focused, AXUIElementCopyAttributeValue(focused as! AXUIElement, kAXRoleAttribute as CFString, &role) == .success else { return false }
+        return [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole].contains(role as? String ?? "")
+    }
+
+    /// Finder's selection (the desktop's too), asked through AppleScript: macOS asks once for permission to control
+    /// Finder. Empty if it's refused or Finder doesn't answer within a second.
+    private func finderSelection() async -> [URL] {
+        let script = """
+            tell application "Finder" to set s to selection as alias list
+            set o to ""
+            repeat with a in s
+            set o to o & POSIX path of a & linefeed
+            end repeat
+            o
+            """
+        let ask = Task { try await run("/usr/bin/osascript", ["-e", script]) }
+        let timeout = Task { try await Task.sleep(nanoseconds: 1_000_000_000); ask.cancel() }
+        defer { timeout.cancel() }
+        let out = (try? await ask.value) ?? ""
+        return out.split(separator: "\n").filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: String($0)) }
+    }
+
+    /// Follows the pointer for the wheel over a selection, and picks when Shift is let go.
+    private func track() {
+        guard selection != nil, let panel, panel.isVisible else { hide(); return }
+        let m = NSEvent.mouseLocation, f = panel.frame
+        model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
+        if !model.lemonHot { movedOff = true }
+        if !NSEvent.modifierFlags.contains(.shift) { release() }
+    }
+
+    /// Let go on a slice: run it. On the lemon after moving off it: queue the files. Anywhere else: close.
+    private func release() {
+        guard let urls = selection else { return }
+        let target = model.hovered, queue = model.lemonHot && !model.centerBack && movedOff
+        model.clearHover()
+        if let target { pick(target, urls) } else if queue { queueIt(urls) } else { hide() }
     }
 
     private func show(_ urls: [URL], links: [URL] = []) {
@@ -643,6 +742,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     private func hide() {
+        selection = nil; follow?.invalidate(); follow = nil
         panel?.orderOut(nil)
         syncTap()
     }

@@ -15,11 +15,12 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **Done** (the original) | **To do**: check; the Mac's presets may already resize in the source's format |
+| **Done** (the original) | **Done** |
 
 - The preset editor's format list starts with **Keep the original format (resize pictures)**: a max width and/or height (Save stays disabled until one is set, or the preset would be an Optimize one), plus optional quality and metadata stripping. The preset counts as Resize (same format, shrink only, "Already small enough", `name (N px).ext`) and goes on the Resize ring, ahead of the built-in sizes.
 - The built-in *Resize – 4K/Full HD/HD/SD* now show in the preset list (read-only), so they can be duplicated and resized. Upscale, Optimize and Remove background stay out of the list. The editor's "Convert to" is now "Format".
 - Windows files: `Lemon.App/ViewModels/PresetsViewModel.cs` (`KeepFormat`, `NeedsSize`), `Views/PresetsPage.xaml`.
+- Mac files: `Settings/Customize.swift` (`PresetEditor.needsSize`/`existing`, `PresetSettings`' *Built-in sizes* section), `Conversion/Presets.swift` (`presets(for:)`), `Wheel/Wheel.swift` (Resize ring order). Came out different on Mac: one *Longest side* box instead of a max width and/or height (as the Mac's other picture presets have), and the built-in sizes are a *Built-in sizes* section with *Duplicate* under the custom presets. The editor was already called "Format". Before this, a Mac custom preset could only resize in its own format when the source was already that format.
 
 ---
 
@@ -27,11 +28,12 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **Done** (the original) | **To do**: the selection hold (with Finder's selection) |
+| **Done** (the original) | **Done** (Shift only) |
 
 - Select files or folders in File Explorer or on the desktop and hold the wheel key alone for 0.7 s: the wheel opens under the pointer for them. Keep holding and point; let go on a slice to run it (a click works too). Letting go on the lemon after moving off it adds them to the queue. Letting go anywhere else, or on the lemon without moving, closes the wheel. Tab / number keys / scrolling / ring names and Esc work as in a drag. Another key, a mouse button or a scroll during the hold cancels it (it was a modifier). So does renaming a file (Win11's address and search boxes aren't plain edit boxes, so they aren't caught). Folders open on Commands as in a drag.
 - Windows' default wheel key is now **Alt** (was Space; Space moves to Alt once, a key picked by hand stays). Alt and Shift can be picked; Ctrl and Win can't. With Shift as the key, Tab always goes forward (Shift is held). Letting go of a held Alt sends a key that does nothing first, so Explorer's menu doesn't open. Tab with the wheel up never reaches Alt+Tab.
-- Mac: Shift stays its key. The Mac would read Finder's selection, e.g. through Finder's scripting, which needs Automation permission.
+- Mac: Shift stays its key.
+- Mac files: `Wheel/Wheel.swift` (`WheelController.holdEvent`, `finderSelection`, `track`, `release`, `typing`), `packaging/make-app.sh` (`NSAppleEventsUsageDescription`). Came out different on Mac: only with Shift as the wheel key (a key like Space would type into Finder, or open Quick Look) and only over Finder (which is the desktop too). The hold starts from a global flagsChanged monitor; once the wheel is up, a 60 Hz timer follows the pointer and Shift, since the wheel's own panel takes the events then. The selection comes from `osascript` asking Finder (1 s timeout), so macOS asks once for Automation permission to control Finder. A focused text field (rename, the search box, read through Accessibility) means typing, so no wheel. Tab always goes forward. Nothing to mask for Alt.
 - Windows files: `Lemon.Core/Wheel/KeyHold.cs` (+ test), `Lemon.App/Wheel/DragGestureMonitor.cs` (hold timer on the hook thread, Alt masking, click to pick), `Wheel/ExplorerSelection.cs` (Shell.Application, the active tab through IShellBrowser, the desktop through FindWindowSW, on an STA thread with a 1 s timeout), `Wheel/WheelWindow.xaml.cs` (`ShowForSelection`, `PickAsync`, `Act` shared with drops), `App.xaml.cs` (`KeyName`, the move to Alt), `Views/WheelTriggers.xaml.cs`.
 
 ---
@@ -40,10 +42,11 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **Done** (the original) | **To do**: check whether the same problems exist |
+| **Done** (the original) | **Done** (checked) |
 
 - **Default preset for new files.** Dropping a file that's already waiting in the queue on a wheel slice (or a right-click *To PNG* on it) made that slice the default for every file of that kind added later, e.g. new pictures defaulting to *Upscale 4×*. The fallback chosen after a preset change did the same. Only picking a preset in the list (or *Set all to*) changes the default now.
 - **Memory after a batch.** Idle in the tray, Lemon hardly allocates, so .NET never collected after a batch, and the GC kept hundreds of MB committed. 40 s after a batch, once the AI models are let go, Lemon runs one aggressive collection (measured after upscaling: 394 → 182 MB private). Mac: check what Lemon holds after a batch.
+- Mac, checked: the default-preset problem doesn't exist (nothing remembers a default; each new file starts on its first Convert preset, and a wheel drop only sets the jobs it runs). Swift frees memory as it goes, and BiRefNet's sessions were already let go 20 s after use. Upscale's Core ML memory isn't let go with its session (measured 1.3 GB after a 4×, 2.4 GB after x4plus), so each upscale runs in a child process: see the AI upscale entry. Unreadable prefs already fall back to defaults. *Delete* in *Settings › AI models* now reports a file it couldn't delete. The Mac's notification has no per-action verb ("3 of 3 done"), so there's no "Upscaled" to add.
 - Windows only: the wheel lets go of its blurred backdrop when it closes. The mouse/keyboard hooks only read event details when needed. A locked or unreadable `settings.json` / `presets.json` falls back to defaults instead of stopping Lemon from starting. The finished-batch notification says "Upscaled …". Upscaling a CMYK picture runs the model on sRGB and converts back, instead of treating C, M and Y as colors and leaving K blocky. *Remove* in Settings › AI models reports a file it couldn't delete. The package drops DirectML's debug DLL and symbols (14 MB).
 
 ---
@@ -52,13 +55,15 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **Done** (the original) | **To do** |
+| **Done** (the original) | **Done** |
 
 - The Resize ring gets four Upscale choices: *2×* and *4×*, each as *AI upscale* (Real-ESRGAN General, `realesr-general-x4v3`, 5 MB) and *Best quality* (`RealESRGAN_x4plus`, 67 MB). Ring order: 4× Best, 4×, 2× Best, 2×, then 4K … SD. Each one appears only once its model is downloaded. The ring's description is now "Shrink or upscale images".
 - Same format out, saved as `name (2×).ext`. The model always works at 4× in 256 px tiles (16 px of overlap, cropped off). *2×* averages each 2×2 block of the tile's result. Color profile and metadata come from the original enlarged with a quick Scale, and the model's RGB replaces its colors. Transparency is the original's alpha enlarged with Lanczos. Speed (RTX 5070, 1000×625 photo, warm): 4× 1.2 s, 2× 0.65 s, 4× x4plus 3.2 s. 512 px tiles weren't faster and took up to 11 GB of video memory, and fp16 exports failed on DirectML. The result is capped at 16383 px on its long side. Not for GIF, ICO, PDF or animated WebP ("Can't upscale animated pictures."). The wheel says "Upscaling 1 file 4×" and the queue says "Upscaling".
 - Models: the official BSD-3 weights exported to ONNX (fp32, opset 17, any input size) by `windows/packaging/export-upscale-models.py`, which checks the upstream `.pth` hashes and compares the ONNX output to PyTorch. They're published as assets of the `models-v1` GitHub release. Input is RGB 0..1 with no normalization, and the output is clamped to 0..1. The Mac can load the same `.onnx` files with ONNX Runtime, as it does for BiRefNet.
 - *Settings › Background remover* became *Settings › AI models* and lists all four models.
 - Windows only (the Mac has no installer): the installer's model checkboxes moved off the tasks page onto an **Optional downloads** page. It has a Converters group (FFmpeg, Pandoc, LibreOffice through `winget` after the install, each in a console window; Ghostscript opens its download page) and an AI models group (all four; BiRefNet Lite and Real-ESRGAN General ticked; ones already there greyed out as *downloaded*). The Ready page lists the choices. Silent installs (winget) skip it all.
+- Mac files: `Conversion/Upscale.swift` (`Upscale.run`, `tiled` + `UpscaleTests`, `inChild`/`child`, `Gate`), `Conversion/Background.swift` (`AIModel`, was `BiRefNet`, now with the Real-ESRGAN entries; `ModelRunner`, was `BiRefNetRunner`, opens Real-ESRGAN on Core ML), `Conversion/Presets.swift` (`Upscaler`, `Preset.upscale/scale`, `upscalePresets`, `upscalable`), `Conversion/Convert.swift`, `Wheel/Wheel.swift` (label, symbol, ring order, "Shrink or upscale images"), `App/LemonApp.swift` (`ModelSettings`, `Entry`).
+- Came out different on Mac: the model runs on Core ML (`MLProgram`, all compute units), with the CPU as a fallback. M2 Pro, 1000×1000 photo, release build, model load included: 4× 5.1 s, 2× 4.9 s, 4× x4plus 22 s (CPU only: 12.7 s, 13.9 s, 211 s; Core ML's output is 72–97 dB PSNR from the CPU's). The Neural Engine alone was as fast for General but 2.7× slower for x4plus. Core ML keeps its memory after the session goes, so each upscale runs in `Lemon --upscale <model> <scale> <in> <out>`, a child process that prints its progress and exits; one at a time. Pixels are read with Core Image in the picture's own RGB space (Display P3 stays P3; CMYK and gray go through sRGB), with straight alpha so see-through edges don't get halos. Metadata is copied with orientation reset to 1. ImageIO writes the result where it can; WebP (and AVIF where ImageIO can't) goes through a PNG and magick. An animated PNG is refused too, not only WebP. The wheel and the queue don't name the action ("Upscaling …"), as for every other action on the Mac.
 - Windows files: `Lemon.Core/Models/ModelFile.cs` (shared download base), `Models/UpscaleModel.cs`, `Conversion/Converters/UpscaleConverter.cs`, `Presets/Preset.cs` (`Upscale`, `Scale`; Upscale presets count as `IsResize`), `Presets/BuiltInPresets.cs`, `Wheel/ConversionWheel.cs`, `Conversion/ConversionService.cs`, `Lemon.App/Views/SettingsPage`.
 
 ---

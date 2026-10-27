@@ -23,9 +23,10 @@ cat > "$APP/Contents/Info.plist" <<'PL'
 <key>CFBundleIconFile</key><string>Lemon</string>
 <key>CFBundleIconName</key><string>Lemon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.4.0</string>
+<key>CFBundleShortVersionString</key><string>0.5.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Lemon reads the files selected in Finder when you hold Shift over them, to open the wheel for them.</string>
 <key>CFBundleDocumentTypes</key><array><dict>
 <key>CFBundleTypeName</key><string>Files</string><key>CFBundleTypeRole</key><string>Viewer</string>
 <key>LSItemContentTypes</key><array><string>public.item</string><string>public.folder</string></array>

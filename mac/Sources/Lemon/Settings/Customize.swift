@@ -114,8 +114,8 @@ struct CustomRing: Codable, Hashable, Identifiable {
 /// Every preset a custom ring can hold, grouped for a menu. "PDF" is in both Images and Documents: by name it's one entry.
 func ringCandidates() -> [(String, [Preset])] {
     let custom = PrefStore.shared.p.custom
-    return [("Optimize", optimizePresets), ("Resize images", resizePresets), ("Remove background", backgroundPresets)]
-        + Kind.allCases.map { k in (k.rawValue, (builtIn + custom).filter { $0.kind == k }) }
+    return [("Optimize", optimizePresets), ("Resize images", upscalePresets + custom.filter(\.isResize) + resizePresets), ("Remove background", backgroundPresets)]
+        + Kind.allCases.map { k in (k.rawValue, (builtIn + custom).filter { $0.kind == k && !$0.isResize }) }
 }
 
 /// Everything the user customized, saved to UserDefaults on every change.
@@ -142,7 +142,7 @@ final class PrefStore: ObservableObject {
 
 /// What can go on the Convert ring for files of this kind.
 func wheelCandidates(_ k: Kind) -> [Preset] {
-    let all = builtIn + PrefStore.shared.p.custom
+    let all = builtIn + PrefStore.shared.p.custom.filter { !$0.isResize }
     return all.filter { $0.kind == k } + (k == .video ? all.filter { $0.kind == .audio && audioFromVideo.contains($0.ext) } : [])
 }
 
@@ -167,7 +167,7 @@ struct SettingsView: View {
         TabView {
             WheelSettings().tabItem { Label("Wheel", systemImage: "circle.circle") }
             PresetSettings().tabItem { Label("Presets", systemImage: "slider.horizontal.3") }
-            BackgroundSettings().tabItem { Label("Background", systemImage: "scissors") }
+            ModelSettings().tabItem { Label("AI models", systemImage: "cpu") }
             AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
     }
@@ -451,8 +451,20 @@ struct PresetSettings: View {
                 Text("They show up in the main window's menus and can be put on the wheel in the Wheel tab. Files already in the list keep the presets they had.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Built-in sizes") {
+                ForEach(resizePresets) { p in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(p.name)
+                            Text(summary(p) + " · built-in").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Duplicate") { var c = p; c.name = "\(p.name) copy"; editing = c }
+                    }
+                }
+            }
         }
-        .settingsPage(height: 420)
+        .settingsPage(height: 520)
         .sheet(item: $editing) { PresetEditor(original: $0) }
     }
 
@@ -464,9 +476,10 @@ struct PresetSettings: View {
     }
 
     private func summary(_ p: Preset) -> String {
-        var s = ["\(p.kind.rawValue) → \(p.ext.uppercased())"]
+        var s = [p.isResize ? "Same format, up to \(p.maxWidth ?? p.maxHeight ?? 0) px" : "\(p.kind.rawValue) → \(p.ext.uppercased())"]
         if let q = p.quality { s.append("quality \(q)") }
-        if let w = p.maxWidth, let h = p.maxHeight, w == h, p.kind == .image { s.append("≤ \(w) px") }
+        if p.isResize {}
+        else if let w = p.maxWidth, let h = p.maxHeight, w == h, p.kind == .image { s.append("≤ \(w) px") }
         else {
             if let w = p.maxWidth { s.append("≤ \(w) px wide") }
             if let h = p.maxHeight { s.append("≤ \(h) px tall") }
@@ -493,9 +506,14 @@ struct PresetEditor: View {
     }()
 
     private var name: String { p.name.trimmingCharacters(in: .whitespaces) }
+    /// Editing a saved custom preset, rather than making one (new, or a duplicate of a built-in size).
+    private var existing: Int? { store.p.custom.firstIndex { $0.name == original.name } }
     private var taken: Bool {
-        (builtIn + optimizePresets + resizePresets + backgroundPresets + store.p.custom).contains { $0.name == name && $0.name != original.name }
+        (builtIn + optimizePresets + resizePresets + upscalePresets + backgroundPresets + store.p.custom)
+            .contains { $0.name == name && !(existing != nil && $0.name == original.name) }
     }
+    /// Keep the original format: without a size it would be an Optimize preset.
+    private var needsSize: Bool { p.isResize && p.maxWidth == nil }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -504,8 +522,10 @@ struct PresetEditor: View {
                     TextField("Name", text: $p.name)
                     Picker("Format", selection: Binding(get: { "\(p.kind)/\(p.ext)" }, set: { tag in
                         // A new format starts from scratch: settings for the old one may not apply.
-                        if let f = Self.formats.first(where: { "\($0.kind)/\($0.ext)" == tag }) { p = Preset(name: p.name, ext: f.ext, kind: f.kind) }
+                        if tag == "\(Kind.image)/" { p = Preset(name: p.name, ext: "", kind: .image) }
+                        else if let f = Self.formats.first(where: { "\($0.kind)/\($0.ext)" == tag }) { p = Preset(name: p.name, ext: f.ext, kind: f.kind) }
                     })) {
+                        Text("Keep the original format (resize pictures)").tag("\(Kind.image)/")
                         ForEach(Kind.allCases, id: \.self) { k in
                             Section(k.rawValue) {
                                 ForEach(Self.formats.filter { $0.kind == k }, id: \.ext) { f in
@@ -516,6 +536,7 @@ struct PresetEditor: View {
                     }
                 } footer: {
                     if taken { Text("Another preset already has this name.").font(.caption).foregroundStyle(.red) }
+                    else if needsSize { Text("Set the longest side: pictures are shrunk to fit it, in their own format.").font(.caption).foregroundStyle(.secondary) }
                 }
                 Section {
                     knobs
@@ -525,7 +546,7 @@ struct PresetEditor: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(name.isEmpty || taken)
+                Button("Save") { save() }.keyboardShortcut(.defaultAction).disabled(name.isEmpty || taken || needsSize)
             }.padding()
         }
         .frame(width: 420, height: 440)
@@ -534,7 +555,7 @@ struct PresetEditor: View {
     @ViewBuilder private var knobs: some View {
         switch p.kind {
         case .image:
-            if ["jpg", "webp", "avif"].contains(p.ext) { number("Quality (1–100)", $p.quality) }
+            if ["jpg", "webp", "avif", ""].contains(p.ext) { number("Quality (1–100)", $p.quality) }
             // magick only resizes when both are set, so images get one "longest side" box.
             number("Longest side (px)", Binding(get: { p.maxWidth }, set: { p.maxWidth = $0; p.maxHeight = $0 }))
             Toggle("Strip metadata", isOn: $p.strip)
@@ -571,10 +592,10 @@ struct PresetEditor: View {
         q.fps = clamp(q.fps, 1...120)
         let side = q.ext == "ico" ? 16...256 : 16...16384
         q.maxWidth = clamp(q.maxWidth, side); q.maxHeight = clamp(q.maxHeight, side)
-        if let i = store.p.custom.firstIndex(where: { $0.name == original.name }), !original.name.isEmpty { store.p.custom[i] = q }
-        else { store.p.custom.append(q) }
+        let saved = existing
+        if let i = saved { store.p.custom[i] = q } else { store.p.custom.append(q) }
         // Keep it on the wheel under its new name.
-        if !original.name.isEmpty, original.name != q.name {
+        if saved != nil, original.name != q.name {
             func rename(_ s: [String]) -> [String] { s.map { $0 == original.name ? q.name : $0 } }
             for (k, s) in store.p.slots { store.p.slots[k] = rename(s) }
             store.p.rings = store.p.rings?.map { var r = $0; r.presets = rename(r.presets); return r }
