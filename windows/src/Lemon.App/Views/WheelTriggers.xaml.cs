@@ -56,7 +56,7 @@ public sealed partial class WheelTriggers : UserControl
     private void ShowWheelKey()
     {
         _recordingKey = false;
-        WheelKeyButton.Content = App.Settings.WheelKey;
+        WheelKeyButton.Content = App.KeyName;
         WheelKeyButton.IsEnabled = App.Settings.WheelOnKey;
     }
 
@@ -88,7 +88,13 @@ public sealed partial class WheelTriggers : UserControl
             WheelKeyButton.Content = "Pick another key…";
             return;
         }
-        App.Settings.WheelKey = e.Key.ToString();
+        // The left and right ones are the same key to the wheel.
+        App.Settings.WheelKey = e.Key switch
+        {
+            VirtualKey.LeftMenu or VirtualKey.RightMenu => nameof(VirtualKey.Menu),
+            VirtualKey.LeftShift or VirtualKey.RightShift => nameof(VirtualKey.Shift),
+            _ => e.Key.ToString(),
+        };
         App.Settings.Save();
         App.ApplyWheelSettings();
         ShowWheelKey();
@@ -96,14 +102,12 @@ public sealed partial class WheelTriggers : UserControl
     }
 
     /// <summary>
-    /// Esc cancels the drag, the number keys pick rings, and modifiers reach the hook as their left / right versions,
-    /// so none of them can be the wheel key.
+    /// Esc cancels the drag and the number keys pick rings. Alt and Shift work (Alt is the default); Ctrl copies a drag
+    /// and Win opens Start, so those two can't be the wheel key.
     /// </summary>
     private static bool CanOpenWheel(VirtualKey key) =>
         key is not (VirtualKey.Escape
-            or VirtualKey.Shift or VirtualKey.LeftShift or VirtualKey.RightShift
             or VirtualKey.Control or VirtualKey.LeftControl or VirtualKey.RightControl
-            or VirtualKey.Menu or VirtualKey.LeftMenu or VirtualKey.RightMenu
             or VirtualKey.LeftWindows or VirtualKey.RightWindows
             or (>= VirtualKey.Number0 and <= VirtualKey.Number9));
 }

@@ -93,14 +93,14 @@
                 </ItemsControl>
             </Border>
 
-            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Background remover" Margin="0,12,0,0" />
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="AI models" Margin="0,12,0,0" />
             <Border Style="{StaticResource CardStyle}" Padding="16,8">
                 <StackPanel>
                     <TextBlock
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" Margin="0,6,0,0"
-                        Text="“Remove background” uses a BiRefNet AI model that runs on this PC. The models are too big to ship with Lemon, so download the one you want (checked and saved in the Lemon folder)." />
+                        Text="“Remove background” (BiRefNet) and “Upscale” (Real-ESRGAN) use AI models that run on this PC. They're too big to ship with Lemon, so download the ones you want (checked and saved in the Lemon folder). Their choices appear on the wheel once downloaded." />
                     <ItemsControl x:Name="ModelList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="views:ModelRow">

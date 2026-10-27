@@ -134,7 +134,8 @@ public sealed class BackgroundRemovalConverter : IConverter
             progress?.Report(1);
         }, cancellationToken);
 
-    private static InferenceSession OpenSession(string path, bool useGpu)
+    /// <summary>Opens a model on the GPU through DirectML, or on the CPU when asked or when DirectML isn't there.</summary>
+    internal static InferenceSession OpenSession(string path, bool useGpu)
     {
         try
         {

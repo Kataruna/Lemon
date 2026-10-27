@@ -22,7 +22,7 @@ public sealed record WheelRing(string Id, string Name, string Glyph, string Deta
         new("convert", "Convert", "\uE8AB", "Change format", WheelPage.Convert),
         new("optimize", "Optimize", "\uE73F", "Make smaller", WheelPage.Optimize),
         new("cutout", "Cut out", "\uE8C6", "Remove background", WheelPage.RemoveBackground),
-        new("resize", "Resize", "\uE740", "Shrink images", WheelPage.Resize),
+        new("resize", "Resize", "\uE740", "Shrink or upscale images", WheelPage.Resize),
     ];
 
     /// <summary>The built-in rings, then the user's own in Settings order; hidden ones included.</summary>
@@ -66,8 +66,9 @@ public static class ConversionWheel
 
     private static readonly string[] RemoveBackgroundOrder = ["img-nobg", "img-nobg-full"];
 
-    /// <summary>Sizes go around their ring from largest to smallest.</summary>
-    private static readonly string[] ResizeOrder = ["resize-4k", "resize-fhd", "resize-hd", "resize-sd"];
+    /// <summary>Sizes go around their ring from largest to smallest, after the Upscale ones.</summary>
+    private static readonly string[] ResizeOrder =
+        ["upscale-4x-full", "upscale-4x", "upscale-2x-full", "upscale-2x", "resize-4k", "resize-fhd", "resize-hd", "resize-sd"];
 
     /// <summary>The ring a preset belongs on.</summary>
     public static WheelPage PageOf(Preset preset) =>
@@ -183,6 +184,9 @@ public static class ConversionWheel
                 _ => ("Balanced", "Looks the same"),
             };
         }
+
+        if (preset.Upscale is { } upscale)
+            return ($"{preset.Scale}×", upscale == UpscaleModel.Lite ? "AI upscale" : "Best quality");
 
         if (preset.IsResize)
             return (preset.Name.Split(" – ", 2, StringSplitOptions.TrimEntries)[^1], $"{preset.MaxWidth ?? preset.MaxHeight} px");

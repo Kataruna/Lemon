@@ -42,6 +42,12 @@ public sealed record Preset
     /// <summary>Set for Remove background presets (which write PNG): the AI model that cuts the subject out.</summary>
     public BackgroundModel? RemoveBackground { get; init; }
 
+    /// <summary>Set for Upscale presets (a kind of Resize): the AI model that enlarges the image <see cref="Scale"/> times.</summary>
+    public UpscaleModel? Upscale { get; init; }
+
+    /// <summary>Only for Upscale presets: 2 or 4.</summary>
+    public int? Scale { get; init; }
+
     /// <summary>Set on the Commands ring's slices: the <see cref="Wheel.WheelCommand.Id"/> a drop there runs.</summary>
     [JsonIgnore]
     public string? CommandId { get; init; }
@@ -53,16 +59,21 @@ public sealed record Preset
     [JsonIgnore]
     public bool IsOptimize => TargetExtension == SameFormat && !IsResize;
 
-    /// <summary>Resize mode (images only): same format, shrunk to fit <see cref="MaxWidth"/> × <see cref="MaxHeight"/>.</summary>
+    /// <summary>
+    /// Resize mode (images only): same format, shrunk to fit <see cref="MaxWidth"/> × <see cref="MaxHeight"/>,
+    /// or enlarged by <see cref="Upscale"/>.
+    /// </summary>
     [JsonIgnore]
-    public bool IsResize => TargetExtension == SameFormat && (MaxWidth is not null || MaxHeight is not null);
+    public bool IsResize => TargetExtension == SameFormat && (MaxWidth is not null || MaxHeight is not null || Upscale is not null);
 
     [JsonIgnore]
     public MediaKind TargetKind => FormatCatalog.KindOf(TargetExtension) ?? MediaKind.Document;
 
     /// <summary>e.g. "WebP · Image · built-in", for preset lists.</summary>
     [JsonIgnore]
-    public string Summary => IsResize
+    public string Summary => Upscale is not null
+        ? $"Same format, {Scale}× larger" + (IsBuiltIn ? " · built-in" : "")
+        : IsResize
         ? $"Same format, up to {MaxWidth ?? MaxHeight} px" + (IsBuiltIn ? " · built-in" : "")
         : IsOptimize
         ? "Same format, smaller file" + (IsBuiltIn ? " · built-in" : "")

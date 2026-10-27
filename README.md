@@ -16,13 +16,13 @@ A drag-and-drop file converter for **Windows** and **macOS**. Drop in pictures, 
 
 ## Features
 
-- **Conversion wheel.** While you drag files from anywhere (File Explorer, Finder, the desktop, a browser…), shake the mouse or press a key (Space on Windows, Shift on Mac, or your own) and a round menu of formats opens under the pointer. Drop on a format to convert right away; drop on the lemon in the middle to add the files to the queue. **Esc** closes the wheel without cancelling the drag.
+- **Conversion wheel.** While you drag files from anywhere (File Explorer, Finder, the desktop, a browser…), shake the mouse or press a key (Alt on Windows, Shift on Mac, or your own) and a round menu of formats opens under the pointer. On Windows you can also select files in File Explorer and hold Alt. Drop on a format to convert right away; drop on the lemon in the middle to add the files to the queue. **Esc** closes the wheel without cancelling the drag.
 - **Rings.** The wheel has rings for *Convert*, *Optimize*, *Cut out* (remove the background) and *Resize*, plus up to five rings of your own. Switch with **Tab**, the number keys, the scroll wheel, or by resting the files on a ring's name. A hub can show all the rings at once.
 - **Commands.** Your own shell (or PowerShell) commands on a Commands ring for dragged files, folders and links: shake a project folder to open it in your terminal or editor, or a link from the browser to hand it to your own tool. See [DETAIL.md](DETAIL.md#commands).
 - **Batch queue.** Drop files or whole folders on the window, give each file its own preset (or use *Set all to*), and convert them in parallel with live progress.
 - **Optimize.** Makes images, videos and PDFs smaller in the same format, with the quality kept close to the original, in three strengths: *Lossless*, *Balanced* and *Smaller*.
 - **Remove background.** Cuts the subject out of a picture onto a transparent PNG, with the BiRefNet AI model running on your own computer (and Apple Vision on the Mac).
-- **Resize.** Shrinks pictures to 4K, Full HD, HD or SD in the same format. Never enlarges.
+- **Resize.** Shrinks pictures to 4K, Full HD, HD or SD in the same format. On Windows it also upscales 2× or 4× with the Real-ESRGAN AI model running on your own computer.
 - **Presets.** Dozens built in (*WebP – Web optimized*, *MP3 – 320 kbps*, *MP4 – 720p small*, *Animated GIF*…), and your own with quality, size, bitrate, CRF, frame rate and metadata settings.
 - **Make it yours.** Themes (including your system's accent color), glass, the emoji in the middle, which formats go on the wheel, and which ring each kind of file opens on, all with a live preview.
 - **Welcome guide.** On first launch, Lemon offers to install the free converters it uses (with `winget` on Windows, Homebrew on Mac) and shows how the wheel works.
@@ -39,10 +39,11 @@ The two apps are written separately (C# / WinUI 3 and Swift / SwiftUI) and share
 |---|---|---|
 | Runs on | Windows 10 (2004+) and 11, 64-bit | macOS 14 Sonoma or later, Apple silicon |
 | Lives in | The notification area (by the clock) | The menu bar |
-| Wheel key by default | Space (pressed) | Shift (held) |
+| Wheel key by default | Alt (pressed mid-drag, or held over files selected in File Explorer) | Shift (held) |
 | Pictures | Built in (bundled ImageMagick) | ImageMagick from Homebrew |
 | Simple documents | Markdown and text built in | DOCX, ODT, RTF, HTML and text built in (`textutil`) |
 | Remove background | BiRefNet on the GPU (DirectML) or CPU | Apple Vision, or BiRefNet on the CPU |
+| AI upscale | Real-ESRGAN on the GPU (DirectML) or CPU | Not yet |
 | Right-click *Convert with Lemon* | Yes | Not yet |
 | Packages | Installer and portable `.exe` | `Lemon.app` in a zip |
 
@@ -65,6 +66,12 @@ Lemon is a friendly front end on top of a lot of excellent free software. Thank 
 | Project | What Lemon uses it for |
 |---|---|
 | [BiRefNet](https://github.com/ZhengPeng7/BiRefNet) | The AI model that cuts out the subject, in the ONNX versions published by [ONNX Community](https://huggingface.co/onnx-community) ([Lite](https://huggingface.co/onnx-community/BiRefNet_lite-ONNX), [full](https://huggingface.co/onnx-community/BiRefNet-ONNX)) |
+
+**Upscale:**
+
+| Project | What Lemon uses it for |
+|---|---|
+| [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) | The AI models that enlarge pictures (`realesr-general-x4v3` and `RealESRGAN_x4plus`, BSD 3-Clause, © 2021 Xintao Wang), exported to ONNX by `windows/packaging/export-upscale-models.py` |
 | [ONNX Runtime](https://onnxruntime.ai) | Runs the model: with DirectML on Windows, and through the [Swift package](https://github.com/microsoft/onnxruntime-swift-package-manager) on Mac |
 
 **Libraries and tools in the apps:**

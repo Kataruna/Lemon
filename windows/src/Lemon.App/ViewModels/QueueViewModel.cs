@@ -297,9 +297,10 @@ public sealed partial class QueueViewModel : ObservableObject
         BatchStatus = $"{BatchVerb(_batch)} · {finished} of {_batch.Count} done · {progress:0%}";
     }
 
-    /// <summary>"Removing background", "Optimizing", "Resizing" or "Converting", by what every job in the batch does.</summary>
+    /// <summary>"Removing background", "Upscaling", "Optimizing", "Resizing" or "Converting", by what every job in the batch does.</summary>
     public static string BatchVerb(IEnumerable<JobViewModel> jobs) =>
         jobs.All(j => j.SelectedPreset?.RemoveBackground is not null) ? "Removing background"
+        : jobs.All(j => j.SelectedPreset?.Upscale is not null) ? "Upscaling"
         : jobs.All(j => j.SelectedPreset?.IsOptimize == true) ? "Optimizing"
         : jobs.All(j => j.SelectedPreset?.IsResize == true) ? "Resizing"
         : "Converting";
@@ -398,7 +399,8 @@ public sealed partial class QueueViewModel : ObservableObject
 
     private void OnJobChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (sender is not JobViewModel job)
+        // Bulk changes (a wheel drop or right-click reusing a waiting row, a preset refresh's fallback) aren't picks.
+        if (sender is not JobViewModel job || _bulk)
             return;
 
         if (e.PropertyName == nameof(JobViewModel.SelectedPreset) && job.SelectedPreset is { } preset && job.IsEditable)
@@ -411,8 +413,6 @@ public sealed partial class QueueViewModel : ObservableObject
             }
         }
 
-        if (_bulk)
-            return;
         if (e.PropertyName is nameof(JobViewModel.Status) or nameof(JobViewModel.SelectedPreset))
             UpdateSummary();
 

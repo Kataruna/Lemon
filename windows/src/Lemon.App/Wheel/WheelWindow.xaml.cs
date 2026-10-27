@@ -94,6 +94,11 @@ public sealed partial class WheelWindow : Window
     private Point? _pointer;
     private int _hover = None;
     private bool _dropped;
+    /// <summary>Up for the files selected in Explorer (a held key, no drag): it follows the pointer itself.</summary>
+    private bool _selection;
+    private readonly DispatcherQueueTimer _follow;
+    /// <summary>Counts holds, so a selection that's read after the key came up is thrown away.</summary>
+    private int _holdCount;
 
     private int _sizePx;
     /// <summary>Where the client area starts inside the window, past WinUI's frame.</summary>
@@ -142,6 +147,10 @@ public sealed partial class WheelWindow : Window
                 GoTo(HubTarget, -1);
         };
 
+        _follow = DispatcherQueue.CreateTimer();
+        _follow.Interval = TimeSpan.FromMilliseconds(16);
+        _follow.Tick += (_, _) => FollowPointer();
+
         _compositor = ElementCompositionPreview.GetElementVisual(Root).Compositor;
         ElementCompositionPreview.GetElementVisual(Ring).CenterPoint = new Vector3((float)Center, (float)Center, 0);
         BuildHub();
@@ -161,6 +170,8 @@ public sealed partial class WheelWindow : Window
         _hideTimer.Stop();
         StopOpenAnimation();
         _closing = false;
+        _selection = false;
+        _follow.Stop();
         _paths = null;
         _files = _folders = _links = [];
         _loading = null;
@@ -264,6 +275,7 @@ public sealed partial class WheelWindow : Window
     {
         _hideTimer.Stop();
         _pageTimer.Stop();
+        _follow.Stop();
         if (!IsOpen || _closing)
             return;
         _closing = true;
@@ -274,6 +286,11 @@ public sealed partial class WheelWindow : Window
             AppWindow.Hide();
             IsOpen = false;
             _closing = false;
+            // The blurred backdrop is only good for this spot on the screen; Lemon may sit in the tray for days.
+            _glass?.Dispose();
+            _glass = null;
+            Frost.Fill = null;
+            _modeBar.Background = null;
             then?.Invoke();
         });
     }
@@ -340,6 +357,23 @@ public sealed partial class WheelWindow : Window
                 _links = [link];
             else if (e.DataView.Contains(StandardDataFormats.StorageItems))
                 dragged = [.. (await e.DataView.GetStorageItemsAsync()).Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p))];
+        }
+        catch (Exception)
+        {
+            // Some sources only provide virtual items (e.g. inside a zip); there's nothing on disk to convert.
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+        await LoadAsync(dragged);
+    }
+
+    /// <summary>Looks inside the dragged (or selected) files and folders and puts up the rings for them.</summary>
+    private async Task LoadAsync(List<string> dragged)
+    {
+        try
+        {
             _folders = [.. dragged.Where(Directory.Exists)];
             _files = [.. dragged.Where(File.Exists)];
             // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread. All of it: these
@@ -348,12 +382,7 @@ public sealed partial class WheelWindow : Window
         }
         catch (Exception)
         {
-            // Some sources only provide virtual items (e.g. inside a zip); there's nothing on disk to convert.
             _paths = [];
-        }
-        finally
-        {
-            deferral.Complete();
         }
 
         try
@@ -409,6 +438,75 @@ public sealed partial class WheelWindow : Window
 
     private void OnDragLeave(object sender, DragEventArgs e) => UpdateHover(None);
 
+    // ---- Held key: the files selected in File Explorer ----
+
+    /// <summary>
+    /// Opens the wheel for what's selected in the Explorer window (or on the desktop) the key was held over. Nothing
+    /// selected, or the key already let go by the time the selection is read: nothing happens.
+    /// </summary>
+    public async void ShowForSelection(int x, int y)
+    {
+        if (IsOpen && !_closing)
+            return;
+        var hold = ++_holdCount;
+        var selected = await ExplorerSelection.ReadAsync(Native.GetForegroundWindow());
+        if (hold != _holdCount || selected.Count == 0 || (IsOpen && !_closing))
+            return;
+        ShowAt(x, y);
+        _selection = true;
+        _loading = LoadAsync([.. selected]);
+        _follow.Start();
+    }
+
+    /// <summary>The held key came up: pick what's under the pointer.</summary>
+    public void OnHeldKeyReleased()
+    {
+        _holdCount++;
+        if (IsSelectionOpen)
+            _ = PickAsync();
+    }
+
+    /// <summary>A click while the key is held picks too.</summary>
+    public void OnHeldClick()
+    {
+        if (IsSelectionOpen)
+            _ = PickAsync();
+    }
+
+    /// <summary>Up for the selected files and nothing picked yet. Read from the hook thread, so only plain fields.</summary>
+    public bool IsSelectionOpen => IsOpen && _selection && !_closing && !_dropped;
+
+    /// <summary>Without a drag there are no drag events, so the wheel watches the pointer itself.</summary>
+    private void FollowPointer()
+    {
+        if (!Native.GetCursorPos(out var cursor))
+            return;
+        var origin = new Native.POINT();
+        Native.ClientToScreen(Handle, ref origin);
+        _pointer = new Point((cursor.X - origin.X) / _scale, (cursor.Y - origin.Y) / _scale);
+        UpdateHover(HitTest(_pointer.Value));
+    }
+
+    private async Task PickAsync()
+    {
+        FollowPointer();
+        _follow.Stop();
+        var hit = _pointer is { } point ? HitTest(point) : None;
+        // Letting go somewhere that isn't a choice closes the wheel. So does letting go on the middle without having
+        // moved: the wheel opens centered on the pointer, so that's just a hold released, not "add to queue".
+        if (hit == None || hit <= ChipHit || (hit >= 0 && (_inHub || hit >= _choices.Count))
+            || (hit == CenterHit && (CenterBack || !_centerArmed)))
+        {
+            Hide();
+            return;
+        }
+        _dropped = true;
+        _pageTimer.Stop();
+        if (_loading is not null)
+            await _loading;
+        Act(hit);
+    }
+
     private async void OnDrop(object sender, DragEventArgs e)
     {
         var hit = HitTest(e.GetPosition(Ring));
@@ -424,6 +522,12 @@ public sealed partial class WheelWindow : Window
         StartLoading(e);
         if (_loading is not null)
             await _loading;
+        Act(hit);
+    }
+
+    /// <summary>Converts (or runs a command on) the dropped or selected files with slice <paramref name="hit"/>, or queues them from the middle.</summary>
+    private void Act(int hit)
+    {
         // Loading may have put up a different ring, with fewer slices.
         if (hit >= _choices.Count)
             hit = CenterHit;
@@ -464,6 +568,7 @@ public sealed partial class WheelWindow : Window
             Celebrate(hit);
             var files = started == 1 ? "1 file" : $"{started} files";
             var text = preset.IsOptimize ? $"Optimizing {files}"
+                : preset.Upscale is not null ? $"Upscaling {files} {ConversionWheel.Label(preset).Title}"
                 : preset.IsResize ? $"Resizing {files} to {ConversionWheel.Label(preset).Title}"
                 : preset.RemoveBackground is not null ? $"Removing background from {files}"
                 : $"Converting {files} to {ConversionWheel.Label(preset).Title}";

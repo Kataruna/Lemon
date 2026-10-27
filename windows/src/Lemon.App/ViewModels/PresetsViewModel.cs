@@ -24,14 +24,16 @@ public sealed partial class PresetsViewModel : ObservableObject
 
     public ObservableCollection<Preset> Items { get; } = [];
 
+    /// <summary>Resize: pictures keep their own format and are only shrunk to the max size.</summary>
+    private static readonly FormatOption KeepFormat = new(Preset.SameFormat, "Keep the original format (resize pictures)");
+
     public static IReadOnlyList<FormatOption> TargetFormats { get; } =
-        new[] { "png", "jpg", "webp", "avif", "gif", "bmp", "tiff", "ico",
+        [KeepFormat, .. new[] { "png", "jpg", "webp", "avif", "gif", "bmp", "tiff", "ico",
                 "mp3", "m4a", "opus", "ogg", "flac", "wav", "aiff",
                 "mp4", "mkv", "webm", "mov",
                 "pdf", "docx", "odt", "rtf", "html", "md", "txt", "epub" }
             .Select(ext => FormatCatalog.Find(ext)!)
-            .Select(f => new FormatOption(f.Extension, $"{f.DisplayName} (.{f.Extension}) · {f.Kind}"))
-            .ToList();
+            .Select(f => new FormatOption(f.Extension, $"{f.DisplayName} (.{f.Extension}) · {f.Kind}"))];
 
     public static IReadOnlyList<BitrateOption> Bitrates { get; } =
         new int?[] { null, 64, 96, 128, 160, 192, 256, 320 }
@@ -47,7 +49,8 @@ public sealed partial class PresetsViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowQuality), nameof(ShowSize), nameof(ShowAudioBitrate), nameof(ShowVideoQuality),
-        nameof(ShowFps), nameof(ShowMetadata), nameof(HasNoOptions))]
+        nameof(ShowFps), nameof(ShowMetadata), nameof(HasNoOptions), nameof(NeedsSize))]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
     public partial FormatOption? Target { get; set; }
 
     [ObservableProperty]
@@ -58,9 +61,13 @@ public sealed partial class PresetsViewModel : ObservableObject
 
     /// <summary>NaN means "no limit" (an empty NumberBox).</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NeedsSize))]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
     public partial double MaxWidth { get; set; } = double.NaN;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NeedsSize))]
+    [NotifyCanExecuteChangedFor(nameof(SaveCommand))]
     public partial double MaxHeight { get; set; } = double.NaN;
 
     [ObservableProperty]
@@ -80,9 +87,16 @@ public sealed partial class PresetsViewModel : ObservableObject
     public bool IsEditable => Selected is { IsBuiltIn: false };
 
     private string TargetExt => Target?.Extension ?? "";
-    private MediaKind TargetKind => FormatCatalog.KindOf(TargetExt) ?? MediaKind.Document;
+    private bool KeepsFormat => TargetExt == Preset.SameFormat;
+    private MediaKind TargetKind => KeepsFormat ? MediaKind.Image : FormatCatalog.KindOf(TargetExt) ?? MediaKind.Document;
 
-    public bool ShowQuality => QualityImages.Contains(TargetExt);
+    /// <summary>
+    /// Keeping the format, the size is the whole point: without one the preset would be an Optimize preset instead.
+    /// </summary>
+    public bool NeedsSize => KeepsFormat && ToInt(MaxWidth) is null && ToInt(MaxHeight) is null;
+
+    // Keeping the format, the quality is used for pictures that have one (JPEG, WebP, AVIF).
+    public bool ShowQuality => QualityImages.Contains(TargetExt) || KeepsFormat;
     public bool ShowSize => TargetKind is MediaKind.Image or MediaKind.Video;
     public bool ShowAudioBitrate => LossyAudio.Contains(TargetExt) || (TargetKind == MediaKind.Video && TargetExt != "gif");
     public bool ShowVideoQuality => TargetKind == MediaKind.Video && TargetExt != "gif";
@@ -136,10 +150,12 @@ public sealed partial class PresetsViewModel : ObservableObject
         Reload(Items.ElementAtOrDefault(Math.Max(0, index - 1))?.Id);
     }
 
-    [RelayCommand]
+    private bool CanSave() => !NeedsSize;
+
+    [RelayCommand(CanExecute = nameof(CanSave))]
     private void Save()
     {
-        if (Selected is not { IsBuiltIn: false } current || Target is null)
+        if (Selected is not { IsBuiltIn: false } current || Target is null || NeedsSize)
             return;
 
         var updated = current with
@@ -161,9 +177,11 @@ public sealed partial class PresetsViewModel : ObservableObject
     private void Reload(string? selectId)
     {
         Items.Clear();
-        // Optimize, Resize and Remove background have nothing to tune (the cutout ignores size and quality, and a copy
-        // retargeted to another format would match no converter), so they aren't listed for editing or duplicating.
-        foreach (var preset in _store.All.Where(p => !p.IsOptimize && !p.IsResize && p.RemoveBackground is null).OrderBy(p => p.TargetKind).ThenBy(p => p.IsBuiltIn))
+        // Optimize, Remove background and Upscale have nothing to tune here (the cutout ignores size and quality, a copy
+        // retargeted to another format would match no converter, and the AI model isn't something this editor picks),
+        // so they aren't listed for editing or duplicating. Resize is: a size, kept in the picture's own format.
+        foreach (var preset in _store.All.Where(p => !p.IsOptimize && p.RemoveBackground is null && p.Upscale is null)
+                     .OrderBy(p => p.IsResize ? MediaKind.Image : p.TargetKind).ThenBy(p => p.IsBuiltIn))
             Items.Add(preset);
         Selected = Items.FirstOrDefault(p => p.Id == selectId) ?? Items.FirstOrDefault();
     }

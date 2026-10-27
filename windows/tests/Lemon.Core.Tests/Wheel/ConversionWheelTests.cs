@@ -107,10 +107,10 @@ public class ConversionWheelTests
     [Fact]
     public void NothingDraggedMeansNoChoices() => Assert.Empty(ConversionWheel.Choose([], MediaKind.Image));
 
-    /// <summary>What a single PNG can use without a background model: image formats, the Optimize strengths and the sizes.</summary>
+    /// <summary>What a single PNG can use without AI models: image formats, the Optimize strengths and the sizes.</summary>
     private static IReadOnlyList<(MediaKind, IReadOnlyList<Preset>)> Png() =>
         [(MediaKind.Image, BuiltInPresets.All
-            .Where(p => p.RemoveBackground is null && (p.Id.StartsWith("img-") || p.IsOptimize || p.IsResize || p.Id == "doc-pdf"))
+            .Where(p => p.RemoveBackground is null && p.Upscale is null && (p.Id.StartsWith("img-") || p.IsOptimize || p.IsResize || p.Id == "doc-pdf"))
             .ToList())];
 
     private static string[] Ids(WheelPlan plan) => [.. plan.Rings.Select(r => r.Id)];

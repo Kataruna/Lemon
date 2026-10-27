@@ -59,11 +59,48 @@ internal static partial class Native
     public const int WM_LBUTTONDOWN = 0x0201;
     public const int WM_LBUTTONUP = 0x0202;
     public const int WM_MOUSEWHEEL = 0x020A;
+    public const int WM_RBUTTONDOWN = 0x0204;
+    public const int WM_MBUTTONDOWN = 0x0207;
+    public const int WM_MOUSEHWHEEL = 0x020E;
+    public const int WM_TIMER = 0x0113;
     public const int VK_TAB = 0x09;
     public const int VK_SHIFT = 0x10;
+    public const int VK_MENU = 0x12;
+    public const int VK_RMENU = 0xA5;
     public const int VK_ESCAPE = 0x1B;
+    /// <summary>An unassigned key code: sent between Alt's press and release so the release doesn't open a menu.</summary>
+    public const byte VK_MASK = 0xE8;
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x1;
+    public const uint KEYEVENTF_KEYUP = 0x2;
 
     public delegate nint HookProc(int code, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll")]
+    public static partial nuint SetTimer(nint hwnd, nuint id, uint milliseconds, nint callback);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool KillTimer(nint hwnd, nuint id);
+
+    [LibraryImport("user32.dll")]
+    public static partial void keybd_event(byte key, byte scan, uint flags, nuint extraInfo);
+
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    /// <summary>The window class of a window, e.g. "CabinetWClass" for File Explorer.</summary>
+    public static unsafe string ClassName(nint hwnd)
+    {
+        var buffer = stackalloc char[64];
+        return new string(buffer, 0, GetClassName(hwnd, buffer, 64));
+    }
+
+    /// <summary>The window class of what has the keyboard focus in <paramref name="window"/>'s thread, or "".</summary>
+    public static string FocusedClass(nint window)
+    {
+        var info = new GUITHREADINFO { Size = Marshal.SizeOf<GUITHREADINFO>() };
+        return GetGUIThreadInfo(GetWindowThreadProcessId(window, out _), ref info) && info.Focus != 0 ? ClassName(info.Focus) : "";
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT

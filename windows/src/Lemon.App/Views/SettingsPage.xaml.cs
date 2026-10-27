@@ -66,16 +66,14 @@ public sealed record ToolStatus(ExternalTool Tool, string Title, string Purpose,
     }
 }
 
-/// <summary>One downloadable background-remover model in Settings.</summary>
-public sealed partial class ModelRow(BackgroundModelInfo info) : ObservableObject
+/// <summary>One downloadable AI model in Settings.</summary>
+public sealed partial class ModelRow(ModelFile info) : ObservableObject
 {
     private CancellationTokenSource? _cancel;
 
-    public BackgroundModelInfo Info { get; } = info;
+    public ModelFile Info { get; } = info;
     public string Title => $"{Info.DisplayName} — {Info.Bytes / 1_000_000} MB";
-    public string Purpose => Info.Model == BackgroundModel.Lite
-        ? "Fast, good for most pictures (recommended)."
-        : "Best edges on hair, fur and fine detail. Slower and needs a lot more memory.";
+    public string Purpose => Info.Purpose;
 
     [ObservableProperty] public partial string Status { get; set; } = "";
     [ObservableProperty] public partial double Progress { get; set; }
@@ -97,8 +95,15 @@ public sealed partial class ModelRow(BackgroundModelInfo info) : ObservableObjec
         }
         if (Info.IsInstalled)
         {
-            File.Delete(Info.Path);
-            Refresh();
+            try
+            {
+                File.Delete(Info.Path);
+                Refresh();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Status = "Couldn't remove it: " + ex.Message;
+            }
             return;
         }
 
@@ -148,7 +153,7 @@ public sealed partial class SettingsPage : Page
             UpdateLink.Visibility = Visibility.Visible;
         }
         RefreshTools();
-        ModelList.ItemsSource = BackgroundModelInfo.All.Select(m => new ModelRow(m)).ToList();
+        ModelList.ItemsSource = BackgroundModelInfo.All.Concat<ModelFile>(UpscaleModelInfo.All).Select(m => new ModelRow(m)).ToList();
         foreach (ModelRow row in (IEnumerable<ModelRow>)ModelList.ItemsSource)
             row.Refresh();
         _loading = false;

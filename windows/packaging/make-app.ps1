@@ -9,4 +9,6 @@ if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 # installer compresses a folder better anyway.
 dotnet publish src\Lemon.App\Lemon.App.csproj -c Release -r win-x64 --self-contained -p:Platform=x64 -p:DebugType=none -o $out
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
+# DirectML's debug layer (only loaded when a debug device is asked for) and its symbols: 14 MB nobody runs.
+Remove-Item "$out\DirectML.Debug.dll", "$out\*.pdb" -ErrorAction SilentlyContinue
 Write-Host "Built $(Resolve-Path $out)"

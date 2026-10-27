@@ -54,7 +54,7 @@
                 <TextBox Header="Name" Text="{x:Bind ViewModel.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
 
                 <ComboBox
-                    Header="Convert to"
+                    Header="Format"
                     HorizontalAlignment="Stretch"
                     DisplayMemberPath="Label"
                     ItemsSource="{x:Bind vm:PresetsViewModel.TargetFormats}"
@@ -62,7 +62,7 @@
                     IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
 
                 <StackPanel Spacing="4" Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowQuality), Mode=OneWay}">
-                    <CheckBox Content="Set image quality" IsChecked="{x:Bind ViewModel.UseQuality, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
+                    <CheckBox Content="Set image quality (JPEG, WebP and AVIF)" IsChecked="{x:Bind ViewModel.UseQuality, Mode=TwoWay}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
                     <Slider
                         Minimum="1"
                         Maximum="100"
@@ -93,6 +93,12 @@
                         Value="{x:Bind ViewModel.MaxHeight, Mode=TwoWay}"
                         IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
                 </Grid>
+
+                <InfoBar
+                    IsOpen="{x:Bind ViewModel.NeedsSize, Mode=OneWay}"
+                    IsClosable="False"
+                    Severity="Warning"
+                    Message="Set a max width or height: pictures keep their format and are shrunk to fit, never enlarged. This preset goes on the Resize ring of the wheel." />
 
                 <ComboBox
                     Header="Audio bitrate"

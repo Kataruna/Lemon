@@ -19,6 +19,10 @@ public static class BuiltInPresets
         Make("resize-fhd", "Resize – Full HD", Preset.SameFormat, p => p with { MaxWidth = 1920, MaxHeight = 1920 }),
         Make("resize-hd", "Resize – HD", Preset.SameFormat, p => p with { MaxWidth = 1280, MaxHeight = 1280 }),
         Make("resize-sd", "Resize – SD", Preset.SameFormat, p => p with { MaxWidth = 640, MaxHeight = 640 }),
+        Make("upscale-2x", "Upscale – 2×", Preset.SameFormat, p => p with { Upscale = UpscaleModel.Lite, Scale = 2 }),
+        Make("upscale-4x", "Upscale – 4×", Preset.SameFormat, p => p with { Upscale = UpscaleModel.Lite, Scale = 4 }),
+        Make("upscale-2x-full", "Upscale – 2× Full quality", Preset.SameFormat, p => p with { Upscale = UpscaleModel.Full, Scale = 2 }),
+        Make("upscale-4x-full", "Upscale – 4× Full quality", Preset.SameFormat, p => p with { Upscale = UpscaleModel.Full, Scale = 4 }),
 
         Make("img-png", "PNG", "png"),
         Make("img-jpg", "JPEG – High quality", "jpg", p => p with { Quality = 90 }),

@@ -114,8 +114,8 @@ public sealed partial class WelcomePage : Page
     private void ShowSummonText()
     {
         var shake = App.Settings.WheelOnShake;
-        SummonLabel.Text = shake ? "2. Shake" : $"2. Press {App.Settings.WheelKey}";
-        KeyCapText.Text = App.Settings.WheelKey ?? "";
+        SummonLabel.Text = shake ? "2. Shake" : $"2. Press {App.KeyName}";
+        KeyCapText.Text = App.KeyName;
         WheelDemo.Children.Remove(shake ? KeyAnimation : ShakeAnimation);
     }
 

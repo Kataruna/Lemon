@@ -17,6 +17,7 @@ public sealed class ConversionService
         [
             new ImageConverter(),
             new BackgroundRemovalConverter(),
+            new UpscaleConverter(),
             new FfmpegConverter(tools),
             new MarkdownConverter(),
             new PandocConverter(tools),
@@ -101,12 +102,14 @@ public sealed class ConversionService
                 : preset.IsResize ? $"Can't resize {source.ToUpperInvariant()} files."
                 : $"Can't convert {source.ToUpperInvariant()} to {preset.TargetExtension.ToUpperInvariant()}.");
 
-        // Resize only ever shrinks; re-encoding an image that already fits would just cost quality.
-        if (preset.IsResize && ImageConverter.Fits(inputPath, preset))
+        // Resize only ever shrinks (Upscale aside); re-encoding an image that already fits would just cost quality.
+        if (preset.IsResize && preset.Upscale is null && ImageConverter.Fits(inputPath, preset))
             return inputPath;
 
         var outputPath = preset.IsOptimize
             ? OutputPaths.Reserve(inputPath, source, outputFolder, OptimizedSuffix)
+            : preset.Upscale is not null
+            ? OutputPaths.Reserve(inputPath, source, outputFolder, $" ({preset.Scale}×)")
             : preset.IsResize
             ? OutputPaths.Reserve(inputPath, source, outputFolder, $" ({preset.MaxWidth ?? preset.MaxHeight} px)")
             : OutputPaths.Reserve(inputPath, preset.TargetExtension, outputFolder, preset.RemoveBackground is null ? null : BackgroundRemovalConverter.Suffix);

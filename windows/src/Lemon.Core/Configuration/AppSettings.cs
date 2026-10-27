@@ -19,8 +19,14 @@ public sealed class AppSettings
     /// <summary>Open the conversion wheel by pressing <see cref="WheelKey"/> while dragging files.</summary>
     public bool WheelOnKey { get; set; } = true;
 
-    /// <summary>The key that opens the conversion wheel, by its Windows.System.VirtualKey name (e.g. "Space").</summary>
-    public string? WheelKey { get; set; } = "Space";
+    /// <summary>
+    /// The key that opens the conversion wheel, by its Windows.System.VirtualKey name ("Menu" is Alt). Pressed mid-drag,
+    /// or held on its own over files selected in File Explorer.
+    /// </summary>
+    public string? WheelKey { get; set; } = "Menu";
+
+    /// <summary>Whether the old default wheel key, Space, has been moved to Alt (once).</summary>
+    public bool WheelKeyMovedToAlt { get; set; }
 
     /// <summary>Look on GitHub for a newer version each time Lemon starts.</summary>
     public bool CheckForUpdates { get; set; } = true;

@@ -52,6 +52,7 @@ public partial class App : Application
     {
         Queue = new QueueViewModel(Settings, Presets, Conversion);
         Queue.BatchFinished += OnBatchFinished;
+        Queue.BatchFinished += _ => TrimMemoryLater();
         Queue.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(QueueViewModel.BatchProgress) or nameof(QueueViewModel.BatchStatus))
@@ -115,11 +116,14 @@ public partial class App : Application
             _ = Windows.System.Launcher.LaunchUriAsync(new Uri(release.Url));
     }
 
-    /// <summary>How the wheel opens right now, e.g. "shake the mouse or press Space".</summary>
+    /// <summary>How the wheel opens right now, e.g. "shake the mouse or press Alt".</summary>
     public static string WheelHint =>
-        Settings.WheelOnShake && Settings.WheelOnKey ? $"shake the mouse or press {Settings.WheelKey}"
-        : Settings.WheelOnKey ? $"press {Settings.WheelKey}"
+        Settings.WheelOnShake && Settings.WheelOnKey ? $"shake the mouse or press {KeyName}"
+        : Settings.WheelOnKey ? $"press {KeyName}"
         : "shake the mouse";
+
+    /// <summary>The wheel key as people know it: Windows calls Alt "Menu".</summary>
+    public static string KeyName => Settings.WheelKey == "Menu" ? "Alt" : Settings.WheelKey ?? "";
 
     /// <summary>A Windows notification from the tray icon about something that went wrong, e.g. a command that failed.</summary>
     internal static void Notify(string title, string message) => _tray?.ShowNotification(title, message, isError: true);
@@ -129,8 +133,17 @@ public partial class App : Application
         // Older settings turned the key off by clearing it, and could leave no way to open the wheel at all.
         if (Settings.WheelKey is null)
         {
-            Settings.WheelKey = "Space";
+            Settings.WheelKey = "Menu";
             Settings.WheelOnKey = false;
+        }
+        // Alt became the default (held, it also opens the wheel for files selected in Explorer). Once, and only for
+        // the old default: a key picked by hand stays, and so does Space if it's picked again later.
+        if (!Settings.WheelKeyMovedToAlt)
+        {
+            if (Settings.WheelKey == "Space")
+                Settings.WheelKey = "Menu";
+            Settings.WheelKeyMovedToAlt = true;
+            Settings.Save();
         }
         if (!Settings.WheelOnShake && !Settings.WheelOnKey)
             Settings.WheelOnShake = true;
@@ -189,7 +202,11 @@ public partial class App : Application
         gestures.EscapePressed += () => wheel.DispatcherQueue.TryEnqueue(wheel.Hide);
         gestures.PageRequested += step => wheel.DispatcherQueue.TryEnqueue(() => wheel.TurnPage(step));
         gestures.PageSelected += number => wheel.DispatcherQueue.TryEnqueue(() => wheel.GoToNumber(number));
+        gestures.KeyHeld += (x, y) => wheel.DispatcherQueue.TryEnqueue(() => wheel.ShowForSelection(x, y));
+        gestures.HeldKeyReleased += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnHeldKeyReleased);
+        gestures.HeldClick += () => wheel.DispatcherQueue.TryEnqueue(wheel.OnHeldClick);
         gestures.IsWheelOpen = () => wheel.IsOpen;
+        gestures.IsSelectionWheelOpen = () => wheel.IsSelectionOpen;
 
         Wheel = wheel;
         _gestures = gestures;
@@ -228,6 +245,7 @@ public partial class App : Application
             var past = QueueViewModel.BatchVerb(done) switch
             {
                 "Removing background" => "Removed background from",
+                "Upscaling" => "Upscaled",
                 "Optimizing" => "Optimized",
                 "Resizing" => "Resized",
                 _ => "Converted",
@@ -237,6 +255,30 @@ public partial class App : Application
                 : string.IsNullOrWhiteSpace(Settings.OutputFolder) ? "Saved next to the originals." : $"Saved in {Settings.OutputFolder}.";
             _tray.ShowNotification(title, message + "\nClick to open Lemon.", isError: false);
         }
+    }
+
+    private static DispatcherQueueTimer? _trim;
+
+    /// <summary>
+    /// Hands the memory a batch used back to Windows once it's over and the AI models have been let go (30 s after
+    /// their last job). Idle in the tray, Lemon allocates next to nothing, so the GC would never run on its own and
+    /// kept a few hundred MB committed (measured: 394 MB private after upscaling, 182 MB after this).
+    /// </summary>
+    private static void TrimMemoryLater()
+    {
+        if (_trim is null)
+        {
+            _trim = DispatcherQueue.GetForCurrentThread().CreateTimer();
+            _trim.IsRepeating = false;
+            _trim.Interval = TimeSpan.FromSeconds(40);
+            _trim.Tick += (_, _) =>
+            {
+                if (!Queue.IsBusy)
+                    GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+            };
+        }
+        _trim.Stop();
+        _trim.Start();
     }
 
     /// <summary>Called on a background thread when another Lemon process forwards its launch to us.</summary>

@@ -34,9 +34,18 @@ A shake is four quick direction changes, each a real swing (at least 40 px), wit
 
 | | Windows | Mac |
 |---|---|---|
-| Default key | **Space**, pressed | **Shift**, held |
-| Other keys | Any key except Esc, 0–9 and the modifiers | Any key except Esc, Tab, 0–9, ⌘ ⌥ ⌃ and Fn; pressed once |
-| How keys are read | A low-level keyboard hook, only during a drag | An event tap, only while the mouse button is down; needs Accessibility permission (holding Shift doesn't) |
+| Default key | **Alt**, pressed (until 0.4.1: Space, which moves to Alt once) | **Shift**, held |
+| Other keys | Any key except Esc, Ctrl, Win and 0–9 (Shift works) | Any key except Esc, Tab, 0–9, ⌘ ⌥ ⌃ and Fn; pressed once |
+| How keys are read | A low-level keyboard hook | An event tap, only while the mouse button is down; needs Accessibility permission (holding Shift doesn't) |
+| Without a drag | Hold the key over files selected in File Explorer (below) | Not yet |
+
+**Selected files (Windows).** Select files or folders in File Explorer or on the desktop, then hold the wheel key on its own for 0.7 s, and the wheel opens under the pointer for them:
+
+- Keep holding, point at a slice and **let go** to run it, or **click** it. Let go on the lemon (after moving off it and back) to add them to the queue. Let go anywhere else, or on the lemon without having moved, and the wheel closes without doing anything.
+- **Tab** turns the ring (Shift+Tab goes back, unless Shift is the wheel key), the number keys and the ring names under the wheel work as in a drag, and so does scrolling. **Esc** closes it.
+- Pressing any other key, a mouse button or scrolling while holding means the key was a modifier (Shift+click, Alt+F4…), so the wheel doesn't open. Nor does it while you're renaming a file.
+- With Alt, letting go doesn't open Explorer's menu: Lemon slips a key that does nothing in between, as launchers do. Tab while the wheel is up turns the ring rather than opening the Alt+Tab switcher.
+- Only File Explorer and the desktop share what's selected; other apps don't, so the key does nothing there. Items with no place on disk (inside a zip, This PC) are left out.
 
 When a drag starts on a folder, Lemon looks inside it (on the Mac, the first 5,000 entries) to offer the right formats. Packages such as an app or a Photos library count as one item.
 
@@ -49,7 +58,7 @@ The wheel has four built-in rings:
 | **Convert** | Up to 8 formats for this kind of file, in your order |
 | **Optimize** | *Lossless*, *Balanced*, *Smaller*: same format, smaller file ([details](#optimize)) |
 | **Cut out** | Remove the background ([details](#remove-background)) |
-| **Resize** | *4K*, *Full HD*, *HD*, *SD* ([details](#resize)) |
+| **Resize** | *4K*, *Full HD*, *HD*, *SD*, and on Windows *2×* / *4×* upscale ([details](#resize)) |
 
 You can hide built-in rings and add up to **five of your own**, each mixing any presets (say, Optimize and Remove background together). A ring only appears when it has something for the dragged files. In a mixed drag (photos and videos together), the wheel offers what works for every file, then what fits the most common kind.
 
@@ -141,6 +150,8 @@ Built-in presets include *PNG*, *JPEG – High quality*, *WebP – Web optimized
 
 Your own presets (*Presets* tab) pick a format and, depending on the kind, quality (1–100), longest side or max width/height, bitrate (kbps), CRF (lower is better), frame rate and metadata stripping. Empty boxes use the default. Custom presets appear in the window and can go on the wheel. A custom preset can also target the file's own format (for example a smaller JPEG), unlike a built-in one.
 
+On Windows, the format can also be **Keep the original format (resize pictures)**: a max width and/or height (one is required), and optionally quality and metadata stripping. Every picture stays in its own format and is shrunk to fit, like the built-in sizes, saved as `name (2560 px).ext`. These presets go on the Resize ring. The built-in *Resize – 4K … SD* are listed too, so one can be duplicated and given another size.
+
 ## Optimize
 
 Optimize makes a file smaller in the same format and keeps the original if it can't. The copy is saved as `name (optimized).ext`; if no version is clearly smaller, the file is marked "Already optimized". Numbers are for *Balanced*, with *Smaller* in brackets. *Lossless* only does the lossless steps, so it's offered for JPEG, PNG and GIF only.
@@ -164,7 +175,14 @@ Cut out saves the subject on a transparent background as `name (no background).p
 
 ## Resize
 
-*4K / Full HD / HD / SD* shrink a picture so its long edge is at most 3840, 1920, 1280 or 640 px, in the same format, saved as `name (1920 px).ext`. Pictures are never enlarged: one that already fits is left alone ("Already small enough").
+*4K / Full HD / HD / SD* shrink a picture so its long edge is at most 3840, 1920, 1280 or 640 px, in the same format, saved as `name (1920 px).ext`. They never enlarge: a picture that already fits is left alone ("Already small enough").
+
+**Upscale (Windows):** *2×* and *4×* enlarge a picture with a Real-ESRGAN AI model on this PC, in the same format, saved as `name (2×).ext`. Each comes in two qualities, and each only appears on the ring once its model is downloaded in *Settings › AI models*:
+
+- **Real-ESRGAN General** (5 MB, *AI upscale*): fast, good for most pictures.
+- **Real-ESRGAN x4plus** (67 MB, *Best quality*): sharper detail on photos, a few times slower.
+
+The model always works at 4×; *2×* halves its result. It runs on the GPU through DirectML when it can, in 256 px tiles so memory stays flat. Transparency, the color profile and metadata are kept (the alpha channel is enlarged normally). The result can be at most 16383 px on its long side. Not for GIF, ICO, PDF or animated WebP. The models are the official weights (BSD 3-Clause) exported to ONNX by `windows/packaging/export-upscale-models.py`, published on the `models-v1` release and pinned to a SHA-256.
 
 ## Output files
 

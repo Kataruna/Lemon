@@ -9,7 +9,7 @@ Lemon is on the [Releases page](https://github.com/Kataruna/Lemon/releases). Win
   - [The SmartScreen warning](#the-smartscreen-warning)
   - [First steps](#first-steps-on-windows)
   - [Converters](#converters-on-windows)
-  - [Remove background models](#remove-background-models-on-windows)
+  - [AI models](#ai-models-on-windows)
   - [Updating and uninstalling](#updating-and-uninstalling-on-windows)
 - [Mac](#mac)
   - [Install with Homebrew](#install-with-homebrew)
@@ -35,7 +35,7 @@ You need Windows 10 (version 2004 or later) or Windows 11, on a 64-bit PC. Nothi
 | Start menu entry, uninstaller | Yes | No |
 | Right-click *Convert with Lemon* menu | Ticked in setup, or in Settings | In Settings |
 | Start with Windows | Ticked in setup, or in Settings | In Settings |
-| Background-remover models | Setup can download them | Downloaded in Settings |
+| Converters and AI models | Setup can get them | Welcome guide and Settings |
 | First launch | Instant | About 2 s while it unpacks to `%TEMP%\.net\Lemon` (once per version) |
 
 Pick the installer unless you want to carry Lemon on a USB stick or try it without installing. Both keep their settings in `%LOCALAPPDATA%\Lemon`, so you can switch between them.
@@ -47,9 +47,13 @@ Pick the installer unless you want to carry Lemon on a USB stick or try it witho
 3. Choose the options you want:
    - **Add "Convert with Lemon" to the right-click menu**: convert files straight from File Explorer.
    - **Start Lemon in the notification area when I sign in**: keeps the wheel ready at all times. The wheel only works while Lemon is running.
-   - **Download the AI model for Remove background**: BiRefNet Lite (224 MB) is ticked; the full model (973 MB) is optional. You can add or remove them later in Settings.
    - **Create a desktop shortcut**.
-4. Finish, and Lemon starts. It installs to `%LOCALAPPDATA%\Programs\Lemon`, for your user only.
+4. On **Optional downloads**, tick what else Lemon should get. Pictures work without any of it:
+   - **Converters** for videos and music (FFmpeg), documents (Pandoc), PDFs from Office files (LibreOffice) and shrinking PDFs (Ghostscript). None are ticked. After Lemon is installed, each one installs with `winget` in a window of its own; Ghostscript isn't on winget, so its download page opens instead.
+   - **AI models** for Remove background (BiRefNet Lite 224 MB, ticked; BiRefNet 973 MB) and Upscale (Real-ESRGAN General 5 MB, ticked; x4plus 67 MB). Models you already have are greyed out as *downloaded*.
+
+   You can add all of these later: converters in the welcome guide, models in *Settings › AI models*.
+5. Finish, and Lemon starts. It installs to `%LOCALAPPDATA%\Programs\Lemon`, for your user only.
 
 ### Run the portable version
 
@@ -74,12 +78,12 @@ Get-FileHash .\Lemon-0.4.1-Setup.exe -Algorithm SHA256
 The first time Lemon opens, a short welcome guide asks what you want to convert besides pictures (each kind of file has an **Add** button that installs its converter with `winget`), then shows how to open the wheel. Skip it if you like; *Settings › About › Show the welcome guide again* brings it back.
 
 - **Convert a batch:** drop files or folders onto the window (or click *Add files*), pick a preset for each file or use *Set all to*, then click **Convert**. Files are saved next to the originals; *Settings › Output* can send them to a folder instead.
-- **Use the wheel:** with Lemon running (minimized or in the notification area is fine), start dragging files anywhere, then **shake the mouse** or press **Space**. Drop on a format, or on the lemon to queue the files.
+- **Use the wheel:** with Lemon running (minimized or in the notification area is fine), start dragging files anywhere, then **shake the mouse** or press **Alt**. Drop on a format, or on the lemon to queue the files. Or select files in File Explorer, **hold Alt**, point at a format and let go.
 - **Closing the window** keeps Lemon in the notification area (the lemon by the clock), so the wheel keeps working. Right-click that lemon to quit.
 
 ### Converters on Windows
 
-Pictures (PNG, JPEG, WebP, AVIF, GIF, TIFF, BMP, ICO, HEIC input, PDF output) work out of the box, and so do Markdown and plain text to HTML or text. The rest uses free tools that Lemon finds once they're installed. The welcome guide installs them for you, or run:
+Pictures (PNG, JPEG, WebP, AVIF, GIF, TIFF, BMP, ICO, HEIC input, PDF output) work out of the box, and so do Markdown and plain text to HTML or text. The rest uses free tools that Lemon finds once they're installed. The installer's *Optional downloads* page or the welcome guide installs them for you, or run:
 
 | To convert | Install | Command |
 |---|---|---|
@@ -90,14 +94,16 @@ Pictures (PNG, JPEG, WebP, AVIF, GIF, TIFF, BMP, ICO, HEIC input, PDF output) wo
 
 No restart needed: Lemon looks again each time you open the wheel or go back to the Convert tab, or when you click *Check again* in **Settings › Converters**. If a tool lives somewhere unusual, click **Locate…** next to it there.
 
-### Remove background models on Windows
+### AI models on Windows
 
-*Cut out* runs an AI model on your PC; no picture leaves it. The models are downloaded once, in **Settings › Background remover** or by the installer:
+*Cut out* and *Upscale* run AI models on your PC; no picture leaves it. The models are downloaded once, in **Settings › AI models** or on the installer's *Optional downloads* page:
 
-- **BiRefNet Lite**, 224 MB: fast, good for most pictures. Recommended.
+- **BiRefNet Lite**, 224 MB: removes backgrounds. Fast, good for most pictures. Recommended.
 - **BiRefNet**, 973 MB: the best edges on hair and fine detail, but slower and needs much more memory.
+- **Real-ESRGAN General**, 5 MB: upscales 2× or 4×. Fast, good for most pictures.
+- **Real-ESRGAN x4plus**, 67 MB: sharper upscaled photos, a few times slower.
 
-They're checked against a fixed SHA-256 and stored in `%LOCALAPPDATA%\Lemon\models`. Lemon uses your graphics card when it can. Until a model is downloaded, the Cut out ring doesn't appear.
+They're checked against a fixed SHA-256 and stored in `%LOCALAPPDATA%\Lemon\models`. Lemon uses your graphics card when it can. Until a model is downloaded, its choices don't appear on the wheel (and the Cut out ring doesn't appear at all).
 
 ### Updating and uninstalling on Windows
 
@@ -181,5 +187,5 @@ To uninstall, quit Lemon and move Lemon.app to the Trash. To remove its data too
 - **The wheel doesn't appear.** Lemon has to be running (the lemon by the clock on Windows, in the menu bar on Mac). Check *Opening the wheel* in Settings, and that you're dragging actual files, not text or a picture from a web page. Keys are only taken over while you drag.
 - **A key on the wheel does nothing (Mac).** Lemon needs [Accessibility permission](#accessibility-permission). After allowing it, the next drag picks it up.
 - **A format is missing.** That kind of file needs one of the converters above; the welcome guide (*Settings › About*) shows which are ready.
-- **Remove background is missing.** On Windows, download a model in *Settings › Background remover*. On Mac, Apple Vision is always there; BiRefNet appears once downloaded.
+- **Remove background is missing.** On Windows, download a model in *Settings › AI models*. The same goes for the 2× / 4× Upscale choices on the Resize ring. On Mac, Apple Vision is always there; BiRefNet appears once downloaded.
 - **Something failed.** The file's row shows the error. On Windows, details also go to `%LOCALAPPDATA%\Lemon\errors.log`, useful to attach when [reporting an issue](https://github.com/Kataruna/Lemon/issues).

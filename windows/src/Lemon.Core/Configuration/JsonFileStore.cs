@@ -25,9 +25,10 @@ public static class JsonFileStore
             using var stream = File.OpenRead(path);
             return JsonSerializer.Deserialize<T>(stream, Options);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            // A corrupt file shouldn't stop the app from starting; fall back to defaults.
+            // A corrupt or locked file (say, mid antivirus scan) shouldn't stop the app from starting; fall back to defaults.
+            ErrorLog.Write("Reading " + Path.GetFileName(path), ex);
             return default;
         }
     }
