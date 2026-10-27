@@ -24,3 +24,15 @@ final class UpscaleTests: XCTestCase {
         }
     }
 }
+
+@MainActor final class WheelStepTests: XCTestCase {
+    /// Arrow keys over a selection: from nothing lit, → lights the top wedge and ← the last; both wrap around.
+    func testArrowsWalkTheWedges() {
+        let m = WheelModel(), p = Array(builtIn.prefix(3))
+        m.load(demo: p)
+        m.step(1); XCTAssertEqual(m.hovered, p[0])
+        m.step(-1); XCTAssertEqual(m.hovered, p[2])
+        m.step(1); XCTAssertEqual(m.hovered, p[0])
+        m.hovered = nil; m.step(-1); XCTAssertEqual(m.hovered, p[2])
+    }
+}

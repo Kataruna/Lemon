@@ -240,6 +240,16 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
             }
         }
     }
+    /// Arrow keys: the wedge after (1, clockwise) or before (-1) the lit one, starting from the top.
+    func step(_ d: Int) {
+        flipTask?.cancel(); switchTarget = nil; lemonHot = false
+        func next<T: Equatable>(_ all: [T], _ lit: T?) -> T? {
+            guard !all.isEmpty else { return nil }
+            guard let i = lit.flatMap(all.firstIndex) else { return all[d > 0 ? 0 : all.count - 1] }
+            return all[(i + d + all.count) % all.count]
+        }
+        if inHub { hoveredMode = next(modes, hoveredMode) } else { hovered = next(choices, hovered) }
+    }
     func clearHover() { hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil; flipTask?.cancel() }
 }
 
@@ -505,6 +515,8 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private var selection: [URL]?
     private var follow: Timer?
     private var movedOff = false
+    /// Where the pointer was at the last look: it only takes over from the arrow keys once it moves.
+    private var lastMouse: NSPoint?
 
     func start() {
         NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .scrollWheel]) { [weak self] e in
@@ -520,7 +532,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] e in
             let picked = MainActor.assumeIsolated { () -> Bool in
                 guard let self, self.selection != nil, self.panel?.isVisible == true else { return false }
-                self.track(); self.release(); return true
+                self.track(force: true); self.release(); return true
             }
             return picked ? nil : e
         }
@@ -584,6 +596,12 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             if !repeating { fired = false; shake.reset(); hide() }
         // Tab. Over a selection with Shift as the key, Shift is being held, so it always goes forward.
         case 48: if !repeating { model.cycle(e.flags.contains(.maskShift) && (selection == nil || PrefStore.shared.p.key != .shift) ? -1 : 1) }
+        // Over a selection, without the mouse: ← ↑ and → ↓ light the slice before or after, Return (or letting go of
+        // the key) runs it; on the hub, Return opens the lit ring. Not mid-drag: a drop goes where the pointer is.
+        case let k where selection != nil && [123, 124, 125, 126].contains(k): model.step(k == 124 || k == 125 ? 1 : -1)
+        case let k where selection != nil && (k == 36 || k == 76):
+            if repeating { break }
+            if model.inHub, let m = model.hoveredMode { model.go(m) } else { release() }
         case let k:
             // Key codes for 0...9 on the number row.
             guard let n = [29, 18, 19, 20, 21, 23, 22, 26, 28, 25].firstIndex(of: k) else { return false }
@@ -651,7 +669,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             let urls = wheelItems(await finderSelection())
             guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(flag), NSEvent.pressedMouseButtons == 0 else { return }
             hold = nil
-            selection = urls; movedOff = false
+            selection = urls; movedOff = false; lastMouse = nil
             show(urls)
             guard panel?.isVisible == true else { selection = nil; return }
             follow = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { _ in MainActor.assumeIsolated { WheelController.shared.track() } }
@@ -698,11 +716,14 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     /// Follows the pointer for the wheel over a selection, and picks when the key is let go.
-    private func track() {
+    private func track(force: Bool = false) {
         guard selection != nil, let panel, panel.isVisible else { hide(); return }
         let m = NSEvent.mouseLocation, f = panel.frame
-        model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
-        if !model.lemonHot { movedOff = true }
+        if force || m != lastMouse {
+            lastMouse = m
+            model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
+            if !model.lemonHot { movedOff = true }
+        }
         if !NSEvent.modifierFlags.contains(PrefStore.shared.p.key.flag ?? []) { release() }
     }
 

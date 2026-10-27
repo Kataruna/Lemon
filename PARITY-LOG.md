@@ -11,6 +11,17 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-27: Arrow keys pick a slice over a selection
+
+| Windows | Mac |
+|---|---|
+| **To do** | **Done** (the original) |
+
+- With the wheel up over selected files (the key held, no drag), **← / ↑** and **→ / ↓** light the slice before or after the lit one (from the top, wrapping round), as ⌘-Tab does with apps. Letting go of the key, or **Return** (keypad Enter too), runs the lit slice; on the hub Return opens the lit ring. Moving the pointer takes over from the keys. Mid-drag the arrows do nothing new: a drop goes where the pointer is.
+- Mac files: `Wheel/Wheel.swift` (`WheelModel.step`, `WheelController.key`, `track(force:)`, `lastMouse`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelStepTests`).
+
+---
+
 ## 2026-10-27: Control is the Mac's wheel key
 
 | Windows | Mac |

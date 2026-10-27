@@ -42,6 +42,7 @@ A shake is four quick direction changes, each a real swing (at least 40 px), wit
 **Selected files.** Select files or folders in File Explorer or on the desktop (Finder on the Mac), then hold the wheel key on its own for 0.7 s, and the wheel opens under the pointer for them:
 
 - Keep holding, point at a slice and **let go** to run it, or **click** it. Let go on the lemon (after moving off it and back) to add them to the queue. Let go anywhere else, or on the lemon without having moved, and the wheel closes without doing anything.
+- Without the mouse (Mac): keep holding the key, press **←** / **→** (or **↑** / **↓**) to light the slice before or after, and let go of the key, or press **Return**, to run it. On the hub, Return opens the lit ring. Moving the pointer takes over again.
 - **Tab** turns the ring (Shift+Tab goes back, unless Shift is the wheel key), the number keys and the ring names under the wheel work as in a drag, and so does scrolling. **Esc** closes it.
 - Pressing any other key, a mouse button or scrolling while holding means the key was a modifier (Shift+click, Alt+F4…), so the wheel doesn't open. Nor does it while you're renaming a file.
 - With Alt, letting go doesn't open Explorer's menu: Lemon slips a key that does nothing in between, as launchers do. Tab while the wheel is up turns the ring rather than opening the Alt+Tab switcher.
