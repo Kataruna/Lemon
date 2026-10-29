@@ -47,6 +47,14 @@ The two apps are written separately (C# / WinUI 3 and Swift / SwiftUI) and share
 | Right-click *Convert with Lemon* | Yes | Not yet |
 | Packages | Installer and portable `.exe` | `Lemon.app` in a zip |
 
+## Inspiration
+
+[Tangerine](https://apps.apple.com/app/tangerine-file-converter/id6813034065) on macOS, whose drag-and-drop conversion (and hold-Shift gesture) Lemon started from, and [Clop](https://lowtechguys.com/clop/), which Optimize follows (its aggressive mode became *Smaller*).
+
+## How it was made
+
+Lemon was developed with AI coding agents (Claude Code): the agents wrote the code, tests and docs. A human directed the work, designed the user experience, and tested the apps on real Windows and Mac machines.
+
 ## Thanks
 
 Lemon is a friendly front end on top of a lot of excellent free software. Thank you to everyone who builds and maintains these projects.
@@ -84,8 +92,6 @@ Lemon is a friendly front end on top of a lot of excellent free software. Thank 
 | [xUnit](https://xunit.net) | The Windows tests |
 | [Inno Setup](https://jrsoftware.org/isinfo.php) | The Windows installer |
 | [winget](https://github.com/microsoft/winget-cli) and [Homebrew](https://brew.sh) | Installing the converters from the welcome guide |
-
-**Inspiration:** [Tangerine](https://apps.apple.com/app/tangerine-file-converter/id6813034065) on macOS, whose drag-and-drop conversion (and hold-Shift gesture) Lemon started from, and [Clop](https://lowtechguys.com/clop/), which Optimize follows (its aggressive mode became *Smaller*).
 
 ## Issues
 
