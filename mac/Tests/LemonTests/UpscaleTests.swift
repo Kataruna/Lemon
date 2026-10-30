@@ -37,6 +37,24 @@ final class UpscaleTests: XCTestCase {
     }
 }
 
+final class WheelKeySideTests: XCTestCase {
+    func testSideIsReadFromTheLowBits() {
+        let control = NSEvent.ModifierFlags.control.rawValue
+        XCTAssertTrue(WheelKey.control.isDown(in: control))
+        XCTAssertTrue(WheelKey.control.on(.left).isDown(in: control | 0x1))
+        XCTAssertFalse(WheelKey.control.on(.left).isDown(in: control | 0x2000))
+        XCTAssertTrue(WheelKey.control.on(.right).isDown(in: control | 0x2000))
+        XCTAssertFalse(WheelKey.control.on(.right).isDown(in: 0x2000))   // the bit without the modifier
+        XCTAssertTrue(WheelKey.shift.on(.right).isDown(in: NSEvent.ModifierFlags.shift.rawValue | 0x4))
+        XCTAssertFalse(WheelKey.shift.on(.right).isDown(in: NSEvent.ModifierFlags.shift.rawValue | 0x2))
+    }
+    func testASidedKeyStaysItsKey() {
+        XCTAssertEqual(WheelKey.control.on(.right).name, "Right Control")
+        XCTAssertTrue(WheelKey.control.on(.right).held)
+        XCTAssertEqual(WheelKey.control.on(.right).on(nil), .control)
+    }
+}
+
 final class KeyTapTests: XCTestCase {
     func testOpeningHoldIsNeitherTapNorClose() {
         var t = KeyTap()

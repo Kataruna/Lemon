@@ -99,6 +99,7 @@ public sealed partial class ModelRow(ModelFile info) : ObservableObject
             {
                 File.Delete(Info.Path);
                 Refresh();
+                UpdateContextMenu();
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -119,7 +120,7 @@ public sealed partial class ModelRow(ModelFile info) : ObservableObject
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException or UnauthorizedAccessException)
         {
             IsBusy = false;
             Refresh();
@@ -128,6 +129,14 @@ public sealed partial class ModelRow(ModelFile info) : ObservableObject
         }
         IsBusy = false;
         Refresh();
+        UpdateContextMenu();
+    }
+
+    /// <summary>The right-click menu offers Remove background and Upscale only with their model downloaded.</summary>
+    private static void UpdateContextMenu()
+    {
+        if (ContextMenu.IsRegistered())
+            ContextMenu.Register(Environment.ProcessPath!, App.Conversion);
     }
 }
 
@@ -236,7 +245,7 @@ public sealed partial class SettingsPage : Page
         if (_loading)
             return;
         if (ContextMenuSwitch.IsOn)
-            ContextMenu.Register(Environment.ProcessPath!, (from, to) => App.Conversion.FindConverter(from, to) is not null);
+            ContextMenu.Register(Environment.ProcessPath!, App.Conversion);
         else
             ContextMenu.Unregister();
     }
@@ -265,7 +274,7 @@ public sealed partial class SettingsPage : Page
 
         // Re-register so the right-click menu offers targets that just became possible.
         if (!_loading && ContextMenuSwitch.IsOn)
-            ContextMenu.Register(Environment.ProcessPath!, (from, to) => App.Conversion.FindConverter(from, to) is not null);
+            ContextMenu.Register(Environment.ProcessPath!, App.Conversion);
     }
 
     private void OnDownloadUpdate(object sender, RoutedEventArgs e) => App.OpenUpdatePage();

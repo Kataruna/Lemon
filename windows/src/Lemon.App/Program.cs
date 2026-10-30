@@ -18,7 +18,7 @@ public static class Program
         {
             case ["--register-context-menu"]:
                 var conversion = new ConversionService(new ToolLocator(tool => AppSettings.Load().ToolPaths.GetValueOrDefault(tool)));
-                ContextMenu.Register(Environment.ProcessPath!, (from, to) => conversion.FindConverter(from, to) is not null);
+                ContextMenu.Register(Environment.ProcessPath!, conversion);
                 return 0;
             case ["--unregister"]:
                 ContextMenu.Unregister();

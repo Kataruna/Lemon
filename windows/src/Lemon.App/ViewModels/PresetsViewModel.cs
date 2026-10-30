@@ -8,6 +8,20 @@ public sealed record FormatOption(string Extension, string Label);
 
 public sealed record BitrateOption(int? Kbps, string Label);
 
+public sealed record PresetCategory(string Name, string Glyph)
+{
+    /// <summary>What screen readers announce for it in the list.</summary>
+    public override string ToString() => Name;
+}
+
+/// <summary>A heading in a category's list and the presets under it.</summary>
+public sealed class PresetGroup(string title, IEnumerable<Preset> presets) : List<Preset>(presets)
+{
+    public string Title { get; } = title;
+
+    public override string ToString() => Title;
+}
+
 /// <summary>Lists presets and edits the selected one. Built-in presets are read-only; duplicate them to customize.</summary>
 public sealed partial class PresetsViewModel : ObservableObject
 {
@@ -15,6 +29,7 @@ public sealed partial class PresetsViewModel : ObservableObject
     private static readonly string[] QualityImages = ["jpg", "webp", "avif"];
 
     private readonly PresetStore _store;
+    private List<Preset> _listed = [];
 
     public PresetsViewModel(PresetStore store)
     {
@@ -22,10 +37,31 @@ public sealed partial class PresetsViewModel : ObservableObject
         Reload(selectId: null);
     }
 
-    public ObservableCollection<Preset> Items { get; } = [];
+    /// <summary>Only one category's presets are listed at a time.</summary>
+    public static List<PresetCategory> Categories { get; } =
+    [
+        new("Images", ""),
+        new("Resize", ""),
+        new("Audio", ""),
+        new("Video", ""),
+        new("Documents", ""),
+    ];
+
+    /// <summary>The current category: the user's own presets, if any, pinned above the built-in ones.</summary>
+    public ObservableCollection<PresetGroup> Groups { get; } = [];
+
+    [ObservableProperty]
+    public partial int CategoryIndex { get; set; }
+
+    // -1 only for a moment: the page puts back a selection cleared by Ctrl+click.
+    partial void OnCategoryIndexChanged(int value)
+    {
+        if (value >= 0)
+            ShowCategory(null);
+    }
 
     /// <summary>Resize: pictures keep their own format and are only shrunk to the max size.</summary>
-    private static readonly FormatOption KeepFormat = new(Preset.SameFormat, "Keep the original format (resize pictures)");
+    private static readonly FormatOption KeepFormat = new(Preset.SameFormat, "Same as the original (resize pictures only)");
 
     public static IReadOnlyList<FormatOption> TargetFormats { get; } =
         [KeepFormat, .. new[] { "png", "jpg", "webp", "avif", "gif", "bmp", "tiff", "ico",
@@ -142,12 +178,13 @@ public sealed partial class PresetsViewModel : ObservableObject
     {
         if (Selected is not { IsBuiltIn: false } preset)
             return;
-        var index = Items.IndexOf(preset);
+        var items = Groups.SelectMany(g => g).ToList();
+        var previous = items.ElementAtOrDefault(Math.Max(0, items.IndexOf(preset) - 1))?.Id;
         _store.Delete(preset.Id);
         // Also take it off the wheel, so it doesn't linger there as a dead entry.
         App.Settings.Wheel.Forget(preset.Id);
         App.Settings.Save();
-        Reload(Items.ElementAtOrDefault(Math.Max(0, index - 1))?.Id);
+        Reload(previous);
     }
 
     private bool CanSave() => !NeedsSize;
@@ -176,15 +213,36 @@ public sealed partial class PresetsViewModel : ObservableObject
 
     private void Reload(string? selectId)
     {
-        Items.Clear();
         // Optimize, Remove background and Upscale have nothing to tune here (the cutout ignores size and quality, a copy
         // retargeted to another format would match no converter, and the AI model isn't something this editor picks),
         // so they aren't listed for editing or duplicating. Resize is: a size, kept in the picture's own format.
-        foreach (var preset in _store.All.Where(p => !p.IsOptimize && p.RemoveBackground is null && p.Upscale is null)
-                     .OrderBy(p => p.IsResize ? MediaKind.Image : p.TargetKind).ThenBy(p => p.IsBuiltIn))
-            Items.Add(preset);
-        Selected = Items.FirstOrDefault(p => p.Id == selectId) ?? Items.FirstOrDefault();
+        _listed = _store.All.Where(p => !p.IsOptimize && p.RemoveBackground is null && p.Upscale is null).ToList();
+        var picked = _listed.FirstOrDefault(p => p.Id == selectId);
+        if (picked is not null)
+            CategoryIndex = Categories.FindIndex(c => c.Name == Category(picked));
+        ShowCategory(picked);
     }
+
+    private void ShowCategory(Preset? selecting)
+    {
+        var inCategory = _listed.Where(p => Category(p) == Categories[CategoryIndex].Name).ToList();
+        Groups.Clear();
+        if (inCategory.Any(p => !p.IsBuiltIn))
+            Groups.Add(new PresetGroup("My presets", inCategory.Where(p => !p.IsBuiltIn)));
+        Groups.Add(new PresetGroup("Default", inCategory.Where(p => p.IsBuiltIn)));
+        Selected = selecting ?? inCategory.OrderBy(p => p.IsBuiltIn).FirstOrDefault();
+    }
+
+    private static string Category(Preset preset) =>
+        preset.IsResize ? "Resize"
+        : preset.Fps is not null ? "Video"
+        : preset.TargetKind switch
+        {
+            MediaKind.Image => "Images",
+            MediaKind.Audio => "Audio",
+            MediaKind.Video => "Video",
+            _ => "Documents",
+        };
 
     private static int? ToInt(double value) => double.IsNaN(value) || value <= 0 ? null : (int)Math.Round(value);
 }

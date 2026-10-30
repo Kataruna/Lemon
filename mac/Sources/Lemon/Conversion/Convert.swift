@@ -48,7 +48,7 @@ private final class Box: @unchecked Sendable {
         partial[i] = Data(buf[cut...])
         return buf[..<cut].split(whereSeparator: isEnd).map { String(decoding: $0, as: UTF8.self) }
     }
-    func text(err isErr: Bool) -> String { lock.lock(); defer { lock.unlock() }; return String(data: isErr ? err : out, encoding: .utf8) ?? "" }
+    func text(err isErr: Bool) -> String { lock.lock(); defer { lock.unlock() }; return String(decoding: isErr ? err : out, as: UTF8.self) }
 }
 
 /// Runs a tool; stdout lines go to onLine, stderr lines to onErr (and are kept for the error message).
@@ -254,7 +254,8 @@ private func ffmpegConvert(_ src: URL, _ dst: URL, _ p: Preset, _ progress: @esc
     if audioOnly { a += ["-vn"] + audio(p.ext, 192) }
     else if p.ext == "gif" {
         let w = p.maxWidth.map { "'min(iw,\($0))'" } ?? "iw"
-        a += ["-vf", "fps=\(p.fps ?? 12),scale=w=\(w):h=-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-an", "-loop", "0"]
+        let h = p.maxHeight.map { "'min(ih,\($0))'" } ?? "ih"
+        a += ["-vf", "fps=\(p.fps ?? 12),scale=w=\(w):h=\(h):force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse", "-an", "-loop", "0"]
     } else {
         // x264/VP9 with yuv420p need even dimensions, so always scale.
         let w = p.maxWidth.map { "'min(iw,\($0))'" } ?? "iw", h = p.maxHeight.map { "'min(ih,\($0))'" } ?? "ih"

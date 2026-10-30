@@ -363,7 +363,8 @@ public sealed partial class QueueViewModel : ObservableObject
         if (quickTarget is not null)
         {
             var matching = presets.Where(p => FormatCatalog.NormalizeExtension(p.TargetExtension) == quickTarget).ToList();
-            return matching.FirstOrDefault(p => p.Id == last?.Id)
+            // Only a plain last pick: a Remove background or Upscale chosen once mustn't turn "To PNG" or "Optimize" into it.
+            return matching.FirstOrDefault(p => p.Id == last?.Id && p.IsPlainConversion)
                 // "--optimize" means Balanced; the other strengths are picked on the wheel or in the list.
                 ?? matching.FirstOrDefault(p => p.Id == BuiltInPresets.OptimizeId)
                 // "To PNG" means a plain PNG, not the background cutout that also writes PNG.

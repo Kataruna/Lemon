@@ -61,21 +61,42 @@ public sealed partial class MainWindow : Window
     /// <summary>Quits Lemon, asking first if conversions are still running.</summary>
     public async void Quit()
     {
+        // Already asking: only one dialog can be open at a time.
+        if (_quitting)
+            return;
         _quitting = true;
         if (App.Queue.IsBusy)
         {
-            BringToFront();
-            var dialog = new ContentDialog
+            try
             {
-                XamlRoot = Content.XamlRoot,
-                Title = "Conversions are still running",
-                Content = "If you quit now, files that haven't finished converting won't be saved.",
-                PrimaryButtonText = "Stop and quit",
-                CloseButtonText = "Keep converting",
-                DefaultButton = ContentDialogButton.Close,
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                BringToFront();
+                // Started in the tray, the window was never shown, and the dialog needs its content to have loaded.
+                var content = (FrameworkElement)Content;
+                if (!content.IsLoaded)
+                {
+                    var loaded = new TaskCompletionSource();
+                    content.Loaded += (_, _) => loaded.TrySetResult();
+                    await loaded.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = content.XamlRoot,
+                    Title = "Conversions are still running",
+                    Content = "If you quit now, files that haven't finished converting won't be saved.",
+                    PrimaryButtonText = "Stop and quit",
+                    CloseButtonText = "Keep converting",
+                    DefaultButton = ContentDialogButton.Close,
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    _quitting = false;
+                    return;
+                }
+            }
+            catch (Exception ex)
             {
+                // Another dialog is open, say. Quit has to keep working afterwards, or only Task Manager would end Lemon.
+                ErrorLog.Write("Asking before quitting", ex);
                 _quitting = false;
                 return;
             }

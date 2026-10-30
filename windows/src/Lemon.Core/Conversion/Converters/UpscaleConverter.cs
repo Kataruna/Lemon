@@ -138,7 +138,7 @@ public sealed class UpscaleConverter : IConverter
                     image.ColorSpace = ColorSpace.CMYK;
                 if (request.Preset.StripMetadata)
                     image.Strip();
-                image.Write(request.OutputPath);
+                ImageConverter.Save(image, request.OutputPath, ImageConverter.FormatOf(request.TargetExtension));
             }
             catch (MagickException ex)
             {

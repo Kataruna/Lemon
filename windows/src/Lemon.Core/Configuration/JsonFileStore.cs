@@ -29,6 +29,14 @@ public static class JsonFileStore
         {
             // A corrupt or locked file (say, mid antivirus scan) shouldn't stop the app from starting; fall back to defaults.
             ErrorLog.Write("Reading " + Path.GetFileName(path), ex);
+            // The defaults get saved over it sooner or later (settings at the next launch), so keep what the user had.
+            try
+            {
+                File.Copy(path, path + ".bad", overwrite: true);
+            }
+            catch (Exception copy) when (copy is IOException or UnauthorizedAccessException)
+            {
+            }
             return default;
         }
     }

@@ -1,3 +1,4 @@
+using Lemon.Core.Wheel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -58,6 +59,22 @@ public sealed partial class WheelTriggers : UserControl
         _recordingKey = false;
         WheelKeyButton.Content = App.KeyName;
         WheelKeyButton.IsEnabled = App.Settings.WheelOnKey;
+        KeySide.Visibility = WheelKeyName.Base(App.Settings.WheelKey) is null ? Visibility.Collapsed : Visibility.Visible;
+        KeySide.IsEnabled = App.Settings.WheelOnKey;
+        KeySide.SelectedIndex = WheelKeyName.Side(App.Settings.WheelKey) switch { "Left" => 1, "Right" => 2, _ => 0 };
+    }
+
+    private void OnKeySideChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var side = KeySide.SelectedIndex switch { 1 => "Left", 2 => "Right", _ => "" };
+        var key = WheelKeyName.WithSide(App.Settings.WheelKey, side);
+        if (key == App.Settings.WheelKey)
+            return;
+        App.Settings.WheelKey = key;
+        App.Settings.Save();
+        App.ApplyWheelSettings();
+        ShowWheelKey();
+        Changed?.Invoke();
     }
 
     private void OnWheelKeyClick(object sender, RoutedEventArgs e)
@@ -88,13 +105,8 @@ public sealed partial class WheelTriggers : UserControl
             WheelKeyButton.Content = "Pick another key…";
             return;
         }
-        // The left and right ones are the same key to the wheel.
-        App.Settings.WheelKey = e.Key switch
-        {
-            VirtualKey.LeftMenu or VirtualKey.RightMenu => nameof(VirtualKey.Menu),
-            VirtualKey.LeftShift or VirtualKey.RightShift => nameof(VirtualKey.Shift),
-            _ => e.Key.ToString(),
-        };
+        // Pressing either one picks the key; the side has its own list, because e.Key doesn't always say which was pressed.
+        App.Settings.WheelKey = WheelKeyName.Base(e.Key.ToString()) ?? e.Key.ToString();
         App.Settings.Save();
         App.ApplyWheelSettings();
         ShowWheelKey();
@@ -102,12 +114,11 @@ public sealed partial class WheelTriggers : UserControl
     }
 
     /// <summary>
-    /// Esc cancels the drag and the number keys pick rings. Alt and Shift work (Alt is the default); Ctrl copies a drag
-    /// and Win opens Start, so those two can't be the wheel key.
+    /// Esc cancels the drag and the number keys pick rings. Alt, Shift and Ctrl work (Alt is the default; mid-drag the
+    /// hook swallows Ctrl, so it doesn't turn the drag into a copy); Win opens Start, so it can't be the wheel key.
     /// </summary>
     private static bool CanOpenWheel(VirtualKey key) =>
         key is not (VirtualKey.Escape
-            or VirtualKey.Control or VirtualKey.LeftControl or VirtualKey.RightControl
             or VirtualKey.LeftWindows or VirtualKey.RightWindows
             or (>= VirtualKey.Number0 and <= VirtualKey.Number9));
 }

@@ -5,7 +5,7 @@
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <RootNamespace>Lemon.App</RootNamespace>
     <AssemblyName>Lemon</AssemblyName>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\Lemon.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
@@ -17,6 +17,8 @@
     <WindowsPackageType>None</WindowsPackageType>
     <!-- Generates Lemon.pri (compiled XAML resources); without it `dotnet publish` output crashes at startup. -->
     <EnableMsixTooling>true</EnableMsixTooling>
+    <!-- Explorer starts one Lemon per selected file. Measured: forwarding to the running one 145 -> 107 ms, startup CPU 1.4 -> 1.1 s, for 49 MB on disk. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <!-- Program.cs provides Main so it can redirect extra launches to the running instance. -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>

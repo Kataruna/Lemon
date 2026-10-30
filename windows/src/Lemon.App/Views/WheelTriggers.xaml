@@ -11,12 +11,17 @@
         <StackPanel Orientation="Horizontal" Spacing="12">
             <TextBlock Text="Key" VerticalAlignment="Center" />
             <Button x:Name="WheelKeyButton" MinWidth="140" Click="OnWheelKeyClick" PreviewKeyDown="OnWheelKeyPressed" LostFocus="OnWheelKeyLostFocus" />
+            <ComboBox x:Name="KeySide" MinWidth="130" SelectionChanged="OnKeySideChanged" AutomationProperties.Name="Side of the keyboard">
+                <ComboBoxItem Content="Either side" />
+                <ComboBoxItem Content="Left" />
+                <ComboBoxItem Content="Right" />
+            </ComboBox>
         </StackPanel>
         <InfoBar x:Name="TriggerInfo" Severity="Informational" IsClosable="True" />
         <TextBlock
             Style="{StaticResource CaptionTextBlockStyle}"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             TextWrapping="Wrap"
-            Text="To change the key, click it and press the one you want (Esc cancels). The key is only taken over during a drag; the rest of the time it works as usual. Lemon has to be running for the wheel to appear (minimized is fine)." />
+            Text="To change the key, click it and press the one you want (Esc cancels). Shift, Ctrl and Alt can be limited to the left or right one. The key is only taken over during a drag; the rest of the time it works as usual. Lemon has to be running for the wheel to appear (minimized is fine)." />
     </StackPanel>
 </UserControl>

@@ -20,10 +20,13 @@ public sealed class AppSettings
     public bool WheelOnKey { get; set; } = true;
 
     /// <summary>
-    /// The key that opens the conversion wheel, by its Windows.System.VirtualKey name ("Menu" is Alt). Pressed mid-drag,
-    /// or held on its own over files selected in File Explorer.
+    /// The key that opens the conversion wheel, by its Windows.System.VirtualKey name ("Menu" is Alt, "RightMenu" only
+    /// the right one). Pressed mid-drag, or held on its own over files selected in File Explorer.
     /// </summary>
     public string? WheelKey { get; set; } = "Menu";
+
+    /// <summary>Whether the Presets page shows its categories' names, or only their icons.</summary>
+    public bool PresetCategoriesExpanded { get; set; } = true;
 
     /// <summary>Whether the old default wheel key, Space, has been moved to Alt (once).</summary>
     public bool WheelKeyMovedToAlt { get; set; }

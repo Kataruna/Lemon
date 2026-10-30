@@ -11,11 +11,55 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-31: Review fixes (names with %, right-click after a cutout, cancelling, GIF height)
+
+| Windows | Mac |
+|---|---|
+| **Done** (the original) | **Partly**: written, but not compiled or run (made on Windows). The rest doesn't apply; see below |
+
+- **Names with %d.** Converting `frame%03d.png` wrote to `frame000.jpg`, over any file of that name, and failed with "produced an empty file". ImageMagick now writes through a stream. Mac: already safe, its scratch names have no %.
+- **Right-click after a cutout.** "To PNG" reused the last preset of that format, so after one Remove background it cut out the background too; "Optimize" could likewise run a Resize or an Upscale. A last pick now only counts if it's a plain conversion. Mac: no right-click menu, and new files don't reuse a last pick.
+- **Cancelling.** The tool is waited for after it's killed, so its partial output really is deleted, and a kill that half fails shows as Canceled, not Failed. Mac: its run() waits for the exit already.
+- **GIF from video** honors a max height, not just a max width, so a tall video fits. Mac too.
+- Windows only: Remove background takes CMYK pictures through sRGB, as Upscale does. Looking through a big dropped or picked folder happens off the UI thread (adding its rows to the queue still doesn't; not measured). A wheel closed and reopened while a big folder was still being read no longer picks up the old files. Quit from the tray while converting, with the window never shown, now asks instead of doing nothing; not tried by hand. A settings or presets file that can't be read is kept as `.bad` before defaults replace it. The Explorer selection skips empty entries from the shell instead of failing, so the wheel doesn't silently stay shut (seen in errors.log; not reproduced). A model download refused by the file system says so instead of staying on "Cancel". Published builds are ReadyToRun.
+- Mac only: a tool's error with invalid UTF-8 near the end keeps its message instead of "failed (exit 1)". A ring switch still waiting from the last wheel no longer turns the next one.
+- Windows files: `Lemon.Core/Configuration/JsonFileStore.cs`, `Lemon.App/Wheel/ExplorerSelection.cs`, `Lemon.Core/Conversion/Converters/ImageConverter.cs` (`Save`), `UpscaleConverter.cs`, `BackgroundRemovalConverter.cs`, `FfmpegConverter.cs`, `ExternalTools/ProcessRunner.cs`, `Presets/Preset.cs` (`IsPlainConversion`), `Lemon.App/ViewModels/QueueViewModel.cs`, `Views/MainWindow.xaml.cs`, `Views/ConvertPage.xaml.cs`, `Views/SettingsPage.xaml.cs`, `Wheel/WheelWindow.xaml.cs`, `Lemon.App.csproj`, test `Conversion/TrickyInputTests.cs`.
+- Mac files: `Conversion/Convert.swift` (`Box.text`, the GIF filter), `Wheel/Wheel.swift` (`WheelModel.load`).
+
+---
+
+## 2026-10-30: Tidier Presets page; Remove background and Upscale in the right-click menu
+
+| Windows | Mac |
+|---|---|
+| **Done** (the original) | **To do**: tidy the preset settings the same way. **Won't do** the menu items as such if the Mac has no Finder menu; check |
+
+- **Presets page.** A vertical strip on the left of the page with *Images*, *Resize*, *Audio*, *Video* and *Documents* replaces the one long list: only that category's presets are listed. Its button collapses the strip to icons only, and that choice is remembered. Your own presets sit in the category they belong to, pinned under a *My presets* heading above a *Default* heading, and the list moves to a preset's category when it's made or saved with another format. Each row's second line now says what the preset does ("WebP · quality 80 · up to 1920 px"). A line below the list says why Optimize, Remove background and Upscale aren't listed. A built-in preset offers *Duplicate* in its notice, with no Save/Delete row. The quality slider only shows once "Set image quality" is ticked. The format box is "Convert to", and its first entry "Same as the original (resize pictures only)".
+- **Right-click menu.** New entries **Remove background**, **Upscale 2×** and **Upscale 4×**, only for file types they work on and only with a model downloaded (the lighter model if both are). The menu updates when a model is downloaded or removed in Settings. Lines now split it into three groups: Open in Lemon, what changes the file (Optimize and the AI entries), and To PNG / JPG…
+- **Installer (Windows only).** The Optional downloads page now looks for FFmpeg, Pandoc, LibreOffice and Ghostscript the way Lemon does; ones it finds are greyed out and marked "installed", as models already were "downloaded". `packaging/Lemon.iss` (`ToolInstalled`).
+- Windows files: `Lemon.Core/Shell/ContextMenu.cs` (`AiActions`, `CommandFlags` for the lines, + test), `Lemon.Core/LaunchRequest.cs` (`--preset <id>`, + test), `Lemon.App/App.xaml.cs`, `Program.cs`, `Views/SettingsPage.xaml.cs`, `Views/PresetsPage.xaml(.cs)`, `ViewModels/PresetsViewModel.cs` (`Categories`, `CategoryIndex`, `PresetGroup`), `Lemon.Core/Configuration/AppSettings.cs` (`PresetCategoriesExpanded`), `Lemon.Core/Presets/Preset.cs` (`Summary`).
+
+---
+
+## 2026-10-30: The wheel key can be one side of the keyboard
+
+| Windows | Mac |
+|---|---|
+| **Done** (the original) | **Partly**: written, but not compiled or run (made on Windows) |
+
+- With Shift, Ctrl or Alt as the wheel key, a **Side** list next to it picks **Either side** (the default), **Left** or **Right**. The other side then does nothing for the wheel, and keeps working as usual. Picking a key again goes back to Either.
+- Windows: **Ctrl can now be the wheel key** (left, right or either), replacing the "Won't do" in the entry below. Mid-drag the hook swallows it, so it doesn't turn the drag into a copy. Win stays refused. Settings keep it in `WheelKey` as `LeftMenu`, `RightControl` and so on, so nothing new is saved and old settings mean Either.
+- Mac: Control and Shift only, as those are the keys it can hold; ⌘ and ⌥ stay refused. `WheelKey.side` is optional, so old prefs decode as Either. Check on a Mac that `CGEventSource.flagsState` carries the left/right bits, and that a chosen side opens the wheel and the other doesn't.
+- Windows files: `Lemon.Core/Wheel/WheelKeyName.cs` (+ test), `Lemon.App/Views/WheelTriggers.xaml(.cs)`, `Wheel/DragGestureMonitor.cs`, `App.xaml.cs`.
+- Mac files: `Settings/Customize.swift` (`WheelKey.Side`, `on`, `isDown`, the *Side* picker), `Wheel/Wheel.swift` (`heldFlags`, `key`, `handle`, `holdEvent`, `track`), test in `Tests/LemonTests/UpscaleTests.swift` (`WheelKeySideTests`).
+
+---
+
 ## 2026-10-27: Review fixes (rotated photos, big batches, upscale memory)
 
 | Windows | Mac |
 |---|---|
-| **Done** (the original) | **To do**: check whether the same problems exist |
+| **Done** (the original) | **Done**: checked by reading the code, nothing to change. Every Mac Resize preset has the same width and height, so turning a photo can't change whether it fits; the summary is sampled 5 times a second; `predict` still copies each tile's tensors, but in bulk, freed straight away, in a child process that exits after the upscale |
 
 - **Resize and rotated photos.** "Already small enough" was decided from the pixels as stored, but the resize turns a photo upright by its EXIF orientation first. A phone photo stored 2560×1440 on its side (a 1440×2560 portrait) passed a custom preset with only a 1440 px max height and was left unresized. The check now reads the orientation and swaps width and height for 90° turns. Mac: check how the "fits already" test sizes a rotated photo.
 - **Big batches.** Each job's progress and status changes walked the whole queue several times on the UI thread, quadratic in the number of files. The summary and the batch's progress are now worked out at most every 100 ms (each row's own bar still follows its job at once). Measured on 2000 small PNG → JPG, 4 at a time: the UI thread was busy 3.0 → 1.3 s, the batch itself took as long. Clearing finished or all files also no longer redoes the summary per file. Mac: check how often the batch summary is recomputed.
@@ -53,7 +97,7 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 | Windows | Mac |
 |---|---|
-| **Won't do**: Windows has its own default (Alt), and Ctrl can't be picked there | **Done** (the original) |
+| **Won't do**: Windows has its own default (Alt), but Ctrl can be picked there since 2026-10-30 | **Done** (the original) |
 
 - The Mac's default wheel key is now **Control**, held (was Shift). Settings saved Shift as "the default", so everyone on Shift moves to Control; Shift can still be picked, as can a pressed key. Control works like Shift did: held mid-drag, or held alone for 0.7 s over a Finder selection, read off the mouse / modifier events, no Accessibility permission needed mid-drag. Control (left or right) is no longer refused when picking a key.
 - Mac files: `Settings/Customize.swift` (`WheelKey.control`, `flag`, `held`, `Prefs.key`), `Wheel/Wheel.swift` (drag trigger, `holdEvent`, `track`, Tab), `App/Welcome.swift`.

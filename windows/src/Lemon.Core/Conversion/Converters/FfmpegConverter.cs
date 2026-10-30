@@ -57,9 +57,10 @@ public sealed class FfmpegConverter(ToolLocator tools) : IConverter
         }
         else if (target == "gif")
         {
-            var width = preset.MaxWidth is { } w ? $"'min(iw,{w})'" : "iw";
+            var width = preset.MaxWidth is { } mw ? $"'min(iw,{mw})'" : "iw";
+            var height = preset.MaxHeight is { } mh ? $"'min(ih,{mh})'" : "ih";
             args.AddRange([
-                "-vf", $"fps={preset.Fps ?? 12},scale=w={width}:h=-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
+                "-vf", $"fps={preset.Fps ?? 12},scale=w={width}:h={height}:force_original_aspect_ratio=decrease:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse",
                 "-an", "-loop", "0",
             ]);
         }

@@ -82,6 +82,9 @@ public sealed class BackgroundRemovalConverter : IConverter
             {
                 using var image = new MagickImage(request.InputPath);
                 image.AutoOrient();
+                // The model sees RGB: a CMYK picture would hand it C, M and Y as colors, and it would miss the subject.
+                if (image.ColorSpace == ColorSpace.CMYK)
+                    image.ColorSpace = ColorSpace.sRGB;
                 progress?.Report(0.1);
                 var model = request.Preset.RemoveBackground!.Value;
                 MagickImage? mask = null;
@@ -113,7 +116,7 @@ public sealed class BackgroundRemovalConverter : IConverter
                 image.Composite(mask, CompositeOperator.CopyAlpha);
                 if (request.Preset.StripMetadata)
                     image.Strip();
-                image.Write(request.OutputPath, MagickFormat.Png);
+                ImageConverter.Save(image, request.OutputPath, MagickFormat.Png);
             }
             catch (MagickException ex)
             {

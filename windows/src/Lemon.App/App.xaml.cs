@@ -122,8 +122,8 @@ public partial class App : Application
         : Settings.WheelOnKey ? $"press {KeyName}"
         : "shake the mouse";
 
-    /// <summary>The wheel key as people know it: Windows calls Alt "Menu".</summary>
-    public static string KeyName => Settings.WheelKey == "Menu" ? "Alt" : Settings.WheelKey ?? "";
+    /// <summary>The wheel key as people know it, e.g. "Alt" or "Right Ctrl".</summary>
+    public static string KeyName => Lemon.Core.Wheel.WheelKeyName.Display(Settings.WheelKey);
 
     /// <summary>A Windows notification from the tray icon about something that went wrong, e.g. a command that failed.</summary>
     internal static void Notify(string title, string message) => _tray?.ShowNotification(title, message, isError: true);
@@ -319,6 +319,6 @@ public partial class App : Application
         if (request.IsEmpty)
             return;
         Window?.ShowConvertPage();
-        Queue.Add(request.Files, request.QuickTarget);
+        Queue.Add(request.Files, request.QuickTarget, Presets.All.FirstOrDefault(p => p.Id == request.PresetId));
     }
 }

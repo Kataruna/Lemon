@@ -48,21 +48,28 @@ public sealed partial class ConvertPage : Page
 
         // Keep the dragged data available until we've read it.
         var deferral = e.GetDeferral();
+        List<string> dropped;
         try
         {
             var items = await e.DataView.GetStorageItemsAsync();
-            Queue.Add(items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)));
+            dropped = [.. items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p))];
         }
         catch (Exception ex)
         {
             ErrorLog.Write("Reading dropped files", ex);
             Queue.Notice = "Lemon couldn't read the dropped files. Try adding them with Add files instead.";
+            return;
         }
         finally
         {
             deferral.Complete();
         }
+        await AddAsync(dropped);
     }
+
+    /// <summary>A folder can be huge (even a whole drive), so it's looked through off the UI thread, as the wheel does.</summary>
+    private async Task AddAsync(IReadOnlyList<string> paths) =>
+        Queue.Add(await Task.Run(() => QueueViewModel.ExpandFolders(paths).ToList()));
 
     private async void OnAddFiles(object sender, RoutedEventArgs e)
     {
@@ -83,7 +90,7 @@ public sealed partial class ConvertPage : Page
         WinRT.Interop.InitializeWithWindow.Initialize(picker, App.Window!.Handle);
 
         if (await picker.PickSingleFolderAsync() is { } folder)
-            Queue.Add([folder.Path]);
+            await AddAsync([folder.Path]);
     }
 
     private void OnSetAllOpening(object sender, object e)

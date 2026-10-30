@@ -93,7 +93,7 @@ internal sealed class DragGestureMonitor : IDisposable
 
     public bool ShakeEnabled { get; set; } = true;
 
-    /// <summary>Virtual-key code that opens the wheel, or 0 for none. Shift, Ctrl and Alt are their generic codes.</summary>
+    /// <summary>Virtual-key code that opens the wheel, or 0 for none. Generic Shift, Ctrl or Alt is either side; the left and right codes are that side only.</summary>
     public int WheelKey { get; set; }
 
     public void Start()
@@ -216,7 +216,7 @@ internal sealed class DragGestureMonitor : IDisposable
             var message = (int)wParam;
             var isDown = message is Native.WM_KEYDOWN or Native.WM_SYSKEYDOWN;
             var isUp = message is Native.WM_KEYUP or Native.WM_SYSKEYUP;
-            var isWheelKey = WheelKey != 0 && Generic(info.VirtualKey) == WheelKey;
+            var isWheelKey = WheelKey != 0 && (info.VirtualKey == WheelKey || Generic(info.VirtualKey) == WheelKey);
 
             // Once the wheel is up over selected files, the wheel key is the wheel's: a tap enters what's lit, a hold
             // closes it. Not the press that opened it (still held), whose release reaches the app as before. Swallowed,
@@ -277,7 +277,7 @@ internal sealed class DragGestureMonitor : IDisposable
 
             // Over selected files (not mid-drag, where a drop goes where the pointer is): A W and D S, or the arrows, light
             // the slice before or after the lit one, and Return (keypad Enter too) enters it. Not with Ctrl or Win held,
-            // so Ctrl+S or Win+D still work.
+            // so Ctrl+S or Win+D still work, unless Ctrl is the wheel key.
             // The rest of a Return press that entered something is ours too: once a slice runs the wheel isn't open
             // any more, and an auto-repeat reaching Explorer would open every selected file.
             if (info.VirtualKey == Native.VK_RETURN && _swallowingReturn)
@@ -286,7 +286,8 @@ internal sealed class DragGestureMonitor : IDisposable
                     _swallowingReturn = false;
                 return 1;
             }
-            if (isDown && SelectionOpen && !Held(Native.VK_CONTROL) && !Held(Native.VK_LWIN) && !Held(Native.VK_RWIN))
+            if (isDown && SelectionOpen && (Generic((uint)WheelKey) == Native.VK_CONTROL || !Held(Native.VK_CONTROL))
+                && !Held(Native.VK_LWIN) && !Held(Native.VK_RWIN))
             {
                 switch (info.VirtualKey)
                 {
@@ -321,7 +322,7 @@ internal sealed class DragGestureMonitor : IDisposable
                     // Turn once per press; auto-repeats while it's held are swallowed too. Shift+Tab goes back, unless
                     // Shift is the key held for the wheel. Over selected files after the opening hold, Shift pressed
                     // again is the wheel's (swallowed, so Windows doesn't see it down) and goes back too.
-                    var back = WheelKey == Native.VK_SHIFT ? _swallowingTap : Held(Native.VK_SHIFT);
+                    var back = Generic((uint)WheelKey) == Native.VK_SHIFT ? _swallowingTap : Held(Native.VK_SHIFT);
                     if (!_swallowingTab)
                         PageRequested?.Invoke(back ? -1 : 1);
                     _swallowingTab = true;
@@ -381,7 +382,7 @@ internal sealed class DragGestureMonitor : IDisposable
     private static int Generic(uint key) => key switch
     {
         0xA0 or 0xA1 => Native.VK_SHIFT,
-        0xA2 or 0xA3 => 0x11,
+        0xA2 or 0xA3 => Native.VK_CONTROL,
         0xA4 or 0xA5 => Native.VK_MENU,
         _ => (int)key,
     };

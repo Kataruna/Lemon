@@ -2,7 +2,7 @@
 ; Installs for the current user only: no admin prompt, into %LOCALAPPDATA%\Programs\Lemon.
 
 #ifndef AppVersion
-  #define AppVersion "0.5.0"
+  #define AppVersion "0.6.0"
 #endif
 
 [Setup]
@@ -163,6 +163,51 @@ begin
   Result := WizardSilent and WasRunning;
 end;
 
+// Keep in sync with Find in Lemon.Core\ExternalTools\ToolLocator.cs: PATH (this process's and the saved ones), then
+// the usual install folders.
+// ponytail: a tool Lemon was pointed at by hand in Settings isn't seen here; it only stays offered, unticked.
+function OnPath(const Exe: String): Boolean;
+var
+  Saved: String;
+begin
+  Result := FileSearch(Exe, GetEnv('PATH')) <> '';
+  if not Result and RegQueryStringValue(HKCU, 'Environment', 'Path', Saved) then
+    Result := FileSearch(Exe, Saved) <> '';
+  if not Result and RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', Saved) then
+    Result := FileSearch(Exe, Saved) <> '';
+end;
+
+function GhostscriptInstalled: Boolean;
+var
+  Found: TFindRec;
+  Root: String;
+begin
+  Result := False;
+  Root := ExpandConstant('{commonpf64}\gs\');
+  if FindFirst(Root + 'gs*', Found) then
+    try
+      repeat
+        Result := FileExists(Root + Found.Name + '\bin\gswin64c.exe');
+      until Result or not FindNext(Found);
+    finally
+      FindClose(Found);
+    end;
+end;
+
+function ToolInstalled(I: Integer): Boolean;
+begin
+  case I of
+    0: Result := OnPath('ffmpeg.exe') or FileExists(ExpandConstant('{localappdata}\Microsoft\WinGet\Links\ffmpeg.exe'))
+        or FileExists(ExpandConstant('{commonpf64}\ffmpeg\bin\ffmpeg.exe'));
+    1: Result := OnPath('pandoc.exe') or FileExists(ExpandConstant('{localappdata}\Pandoc\pandoc.exe'))
+        or FileExists(ExpandConstant('{commonpf64}\Pandoc\pandoc.exe'));
+    2: Result := OnPath('soffice.exe') or FileExists(ExpandConstant('{commonpf64}\LibreOffice\program\soffice.exe'));
+    3: Result := OnPath('gswin64c.exe') or GhostscriptInstalled;
+  else
+    Result := False;
+  end;
+end;
+
 function OnDownloadProgress(const Url, FileName: String; const Progress, ProgressMax: Int64): Boolean;
 begin
   if Progress = ProgressMax then
@@ -197,7 +242,10 @@ begin
 
   ExtrasList.AddGroup('Converters for other kinds of files (needs internet)', '', 0, nil);
   for I := 0 to ToolCount - 1 do
-    ToolItems[I] := ExtrasList.AddCheckBox(ToolNames[I], '', 1, False, True, False, False, nil);
+    if ToolInstalled(I) then
+      ToolItems[I] := ExtrasList.AddCheckBox(ToolNames[I], 'installed', 1, False, False, False, False, nil)
+    else
+      ToolItems[I] := ExtrasList.AddCheckBox(ToolNames[I], '', 1, False, True, False, False, nil);
 
   ExtrasList.AddGroup('AI models (needs internet)', '', 0, nil);
   for I := 0 to ModelCount - 1 do
@@ -214,7 +262,7 @@ end;
 
 function ToolChosen(I: Integer): Boolean;
 begin
-  Result := not WizardSilent and ExtrasList.Checked[ToolItems[I]];
+  Result := not WizardSilent and ExtrasList.ItemEnabled[ToolItems[I]] and ExtrasList.Checked[ToolItems[I]];
 end;
 
 function ModelChosen(I: Integer): Boolean;

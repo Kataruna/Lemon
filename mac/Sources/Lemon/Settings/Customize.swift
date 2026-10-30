@@ -82,11 +82,28 @@ struct Prefs: Codable, Equatable {
 /// The key that opens the wheel mid-drag. Control or Shift is held (read off the mouse events, no permission needed); any other
 /// key is pressed, which needs the key tap and so Accessibility permission.
 struct WheelKey: Codable, Hashable {
+    enum Side: String, Codable, CaseIterable { case left = "Left", right = "Right" }
     var code: Int64, name: String
+    var side: Side? = nil   // nil = either; Control and Shift only
     static let shift = WheelKey(code: 56, name: "Shift"), control = WheelKey(code: 59, name: "Control")
     /// The modifier held for Control or Shift; nil for a key that's pressed.
-    var flag: NSEvent.ModifierFlags? { self == .control ? .control : self == .shift ? .shift : nil }
+    var flag: NSEvent.ModifierFlags? { code == 59 ? .control : code == 56 ? .shift : nil }
     var held: Bool { flag != nil }
+    /// The same Control or Shift on that side of the keyboard.
+    func on(_ side: Side?) -> WheelKey {
+        let base = code == 59 ? "Control" : "Shift"
+        return WheelKey(code: code, name: side.map { "\($0.rawValue) \(base)" } ?? base, side: side)
+    }
+    /// Whether these modifier flags have the key down, on its side if it has one. The flags' low bits tell the sides apart
+    /// (the NX_DEVICE…KEYMASK values), in both NSEvent's and CGEvent's flags.
+    func isDown(in flags: UInt) -> Bool {
+        guard let flag, flags & flag.rawValue == flag.rawValue else { return false }
+        switch side {
+        case nil: return true
+        case .left: return flags & (code == 59 ? 0x1 : 0x2) != 0
+        case .right: return flags & (code == 59 ? 0x2000 : 0x4) != 0
+        }
+    }
     /// Esc closes the wheel, Tab and 0–9 switch rings, and ⌘ ⌥ change what the drag does.
     static let taken: Set<Int64> = [53, 48, 29, 18, 19, 20, 21, 23, 22, 26, 28, 25, 55, 54, 58, 61, 63, 57]
     private static let names: [Int64: String] = [49: "Space", 36: "Return", 51: "Delete", 117: "Forward Delete", 115: "Home", 119: "End",
@@ -106,7 +123,7 @@ struct WheelKey: Codable, Hashable {
         let printable = chars.unicodeScalars.first.map { $0.value > 32 && $0.value < 0xF700 } ?? false
         self.init(code: c, name: Self.names[c] ?? (printable ? chars : "Key \(c)"))
     }
-    init(code: Int64, name: String) { self.code = code; self.name = name }
+    init(code: Int64, name: String, side: Side? = nil) { self.code = code; self.name = name; self.side = side }
 }
 
 /// A ring the user puts together from any presets: convert, optimize, remove background, their own.
@@ -204,6 +221,12 @@ struct WheelTriggers: View {
             LabeledContent(p.key.held ? "Key (hold)" : "Key") {
                 Button(recording != nil ? (refused ? "Pick another key…" : "Press a key…") : p.key.name) { record() }
                     .onDisappear(perform: stop)
+            }
+            if p.key.held {
+                Picker("Side", selection: Binding(get: { p.key.side }, set: { store.p.wheelKey = p.key.on($0) })) {
+                    Text("Either").tag(WheelKey.Side?.none)
+                    ForEach(WheelKey.Side.allCases, id: \.self) { Text($0.rawValue).tag(WheelKey.Side?.some($0)) }
+                }
             }
             if !p.key.held, !AXIsProcessTrusted() {
                 HStack {

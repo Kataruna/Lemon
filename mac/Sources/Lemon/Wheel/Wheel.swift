@@ -182,6 +182,7 @@ func wheelLabel(_ p: Preset) -> (String, String?) {
     }
 
     func load(_ urls: [URL], files: [URL] = [], folders: [URL] = [], links: [URL] = []) {
+        flipTask?.cancel()   // a rest on the last wheel's ring mustn't turn this one
         shown = false; hovered = nil; hoveredMode = nil; lemonHot = false; switchHot = false; switchTarget = nil; centerArmed = false
         self.files = files; self.folders = folders; self.links = links
         let main = mainKind(urls), table = presetTable(urls), hidden = PrefStore.shared.p.hidden ?? []
@@ -615,7 +616,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         guard NSEvent.pressedMouseButtons & 1 != 0 || selection != nil else { return false }
         // ⌘-Tab, ⌘W and the like belong to the system and the apps.
         guard !e.flags.contains(.maskCommand) else { return false }
-        if let f = PrefStore.shared.p.key.flag, e.flags.contains(f == .control ? .maskControl : .maskShift) { keyTap.otherKey() }
+        if PrefStore.shared.p.key.isDown(in: UInt(e.flags.rawValue)) { keyTap.otherKey() }
         let repeating = e.getIntegerValueField(.keyboardEventAutorepeat) != 0
         guard panel?.isVisible == true else {
             let p = PrefStore.shared.p
@@ -661,7 +662,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
         case .leftMouseDragged:
             // Shake, or hold Control / Shift, as Settings allows. A key that's pressed arrives through the key tap.
             let p = PrefStore.shared.p
-            let shaken = (p.onShake && shake.add(NSEvent.mouseLocation, e.timestamp)) || (p.onKey && p.key.flag.map(e.modifierFlags.contains) == true)
+            let shaken = (p.onShake && shake.add(NSEvent.mouseLocation, e.timestamp)) || (p.onKey && p.key.isDown(in: e.modifierFlags.rawValue))
             if shaken { open() }
         default: break
         }
@@ -694,7 +695,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     private func holdEvent(_ e: NSEvent) {
         let p = PrefStore.shared.p
         guard let flag = p.key.flag, e.type == .flagsChanged, e.modifierFlags.intersection([.shift, .control, .option, .command, .function]) == flag,
-              p.onKey, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
+              p.key.isDown(in: e.modifierFlags.rawValue), p.onKey, !down, selection == nil, NSEvent.pressedMouseButtons == 0,
               NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder" else { cancelHold(); return }
         hold?.cancel()
         let start = Date()
@@ -707,7 +708,7 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
                 .contains { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) < since }
             guard !Task.isCancelled, !busy, !typing() else { return }
             let urls = wheelItems(await finderSelection())
-            guard !Task.isCancelled, !urls.isEmpty, NSEvent.modifierFlags.contains(flag), NSEvent.pressedMouseButtons == 0 else { return }
+            guard !Task.isCancelled, !urls.isEmpty, p.key.isDown(in: Self.heldFlags), NSEvent.pressedMouseButtons == 0 else { return }
             hold = nil
             selection = urls; movedOff = false; lastMouse = nil; keyTap = KeyTap()
             show(urls)
@@ -718,6 +719,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
     }
 
     private func cancelHold() { hold?.cancel(); hold = nil }
+
+    /// The modifiers down right now, with the bits that tell left from right.
+    private static var heldFlags: UInt { UInt(CGEventSource.flagsState(.combinedSessionState).rawValue) }
 
     /// Whether a text field has the keyboard focus (needs Accessibility, which the wheel's keys already ask for).
     private func typing() -> Bool {
@@ -772,8 +776,9 @@ private final class WheelPanel: NSPanel { override var canBecomeKey: Bool { Pref
             model.hover(at: CGPoint(x: m.x - f.minX, y: f.maxY - m.y))
             if !model.lemonHot { movedOff = true }
         }
-        guard let flag = PrefStore.shared.p.key.flag else { return }
-        switch keyTap.update(held: NSEvent.modifierFlags.contains(flag), now: ProcessInfo.processInfo.systemUptime) {
+        let key = PrefStore.shared.p.key
+        guard key.held else { return }
+        switch keyTap.update(held: key.isDown(in: Self.heldFlags), now: ProcessInfo.processInfo.systemUptime) {
         case .enter: activate()
         case .close: hide()
         case nil: break

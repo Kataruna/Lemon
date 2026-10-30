@@ -50,11 +50,11 @@ internal static class ExplorerSelection
     {
         // Every COM object is let go before this thread ends. Idle in the tray Lemon hardly ever collects garbage, so
         // left to the finalizer they'd keep Explorer's objects alive for days, then be released from a thread that's gone.
-        var com = new List<object>();
-        dynamic Keep(object value)
+        var com = new List<object?>();
+        dynamic Keep(object? value)
         {
             com.Add(value);
-            return value;
+            return value!;
         }
         try
         {
@@ -67,6 +67,9 @@ internal static class ExplorerSelection
                 var tab = FindWindowEx(window, 0, "ShellTabWindowClass", null);
                 foreach (dynamic candidate in windows)
                 {
+                    // A window that's closing leaves an empty entry.
+                    if (candidate is null)
+                        continue;
                     Keep(candidate);
                     if ((nint)(long)candidate.HWND == window && (tab == 0 || TabOf(candidate) == tab))
                     {
@@ -79,14 +82,20 @@ internal static class ExplorerSelection
             {
                 object desktop = 0 /* CSIDL_DESKTOP */, root = Type.Missing;
                 int hwnd;
-                view = Keep(Keep(windows.FindWindowSW(ref desktop, ref root, 8 /* SWC_DESKTOP */, out hwnd, 1 /* SWFO_NEEDDISPATCH */)).Document);
+                dynamic? found = Keep(windows.FindWindowSW(ref desktop, ref root, 8 /* SWC_DESKTOP */, out hwnd, 1 /* SWFO_NEEDDISPATCH */));
+                view = found is null ? null : Keep(found.Document);
             }
 
             var paths = new List<string>();
             if (view is null)
                 return paths;
-            foreach (dynamic item in Keep(view.SelectedItems()))
+            dynamic? items = Keep(view.SelectedItems());
+            if (items is null)
+                return paths;
+            foreach (dynamic item in items)
             {
+                if (item is null)
+                    continue;
                 Keep(item);
                 // Things with no place on disk (inside a zip, This PC, Control Panel) can't be converted.
                 if (item.Path is string path && (File.Exists(path) || Directory.Exists(path)))

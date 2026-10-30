@@ -32,6 +32,19 @@ public class PresetStoreTests
     }
 
     [Fact]
+    public void AFileThatCantBeReadIsKeptBeforeDefaultsReplaceIt()
+    {
+        using var temp = new TempFolder();
+        var path = temp.File("settings.json");
+        File.WriteAllText(path, "{ broken");
+
+        var settings = AppSettings.Load(path);
+        settings.Save(path);
+
+        Assert.Equal("{ broken", File.ReadAllText(path + ".bad"));
+    }
+
+    [Fact]
     public void BuiltInIdsAreUnique() =>
         Assert.Equal(BuiltInPresets.All.Count, BuiltInPresets.All.Select(p => p.Id).Distinct().Count());
 }

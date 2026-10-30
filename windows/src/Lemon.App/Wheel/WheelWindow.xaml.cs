@@ -351,14 +351,15 @@ public sealed partial class WheelWindow : Window
     /// <summary>Reads the dragged files before the drop so the wheel can show formats that fit them.</summary>
     private async Task LoadAsync(DragEventArgs e)
     {
+        var opening = _openCount;
         var deferral = e.GetDeferral();
-        List<string> dragged = [];
+        List<string> dragged = [], links = [];
         try
         {
             // A link counts as a link even when the browser adds a file for it, but only with a command for links:
             // otherwise a drag carrying both still converts its files.
             if (HasLinkCommand && await LinkAsync(e.DataView) is { } link)
-                _links = [link];
+                links = [link];
             else if (e.DataView.Contains(StandardDataFormats.StorageItems))
                 dragged = [.. (await e.DataView.GetStorageItemsAsync()).Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p))];
         }
@@ -370,24 +371,33 @@ public sealed partial class WheelWindow : Window
         {
             deferral.Complete();
         }
-        await LoadAsync(dragged);
+        if (opening != _openCount)
+            return;
+        _links = links;
+        await LoadAsync(dragged, opening);
     }
 
     /// <summary>Looks inside the dragged (or selected) files and folders and puts up the rings for them.</summary>
-    private async Task LoadAsync(List<string> dragged)
+    /// <param name="opening">The <see cref="_openCount"/> these files are for.</param>
+    private async Task LoadAsync(List<string> dragged, int opening)
     {
+        List<string> paths;
         try
         {
             _folders = [.. dragged.Where(Directory.Exists)];
             _files = [.. dragged.Where(File.Exists)];
             // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread. All of it: these
             // are the files a drop converts, so a cap would silently leave the rest of a big folder out.
-            _paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).ToList());
+            paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).ToList());
         }
         catch (Exception)
         {
-            _paths = [];
+            paths = [];
         }
+        // The wheel closed and came back for other files while a big folder was read: a drop must not convert these.
+        if (opening != _openCount)
+            return;
+        _paths = paths;
 
         try
         {
@@ -464,7 +474,7 @@ public sealed partial class WheelWindow : Window
         // Know where the pointer is before the files load: with none, loading would count the lemon as left already,
         // and a tap right away would queue the files.
         FollowPointer(force: true);
-        _loading = LoadAsync([.. selected]);
+        _loading = LoadAsync([.. selected], _openCount);
         _follow.Start();
     }
 

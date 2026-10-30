@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
 
@@ -63,10 +64,12 @@ public static class ProcessRunner
             try
             {
                 process.Kill(entireProcessTree: true);
+                // Killing only asks: until it's gone the tool still holds its output, which the caller is about to delete.
+                process.WaitForExit(3000);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or AggregateException)
             {
-                // Already exited.
+                // Exited meanwhile, or one of its children did. Canceled either way, not a failed job.
             }
             throw;
         }

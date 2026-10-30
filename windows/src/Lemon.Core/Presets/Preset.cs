@@ -66,16 +66,42 @@ public sealed record Preset
     [JsonIgnore]
     public bool IsResize => TargetExtension == SameFormat && (MaxWidth is not null || MaxHeight is not null || Upscale is not null);
 
+    /// <summary>A format change and nothing else special: what "To PNG" means, unlike a cutout that also writes PNG.</summary>
+    [JsonIgnore]
+    public bool IsPlainConversion => RemoveBackground is null && Upscale is null && !IsResize;
+
     [JsonIgnore]
     public MediaKind TargetKind => FormatCatalog.KindOf(TargetExtension) ?? MediaKind.Document;
 
-    /// <summary>e.g. "WebP · Image · built-in", for preset lists.</summary>
+    /// <summary>What the preset does, e.g. "WebP · quality 80 · up to 1920 px", for preset lists.</summary>
     [JsonIgnore]
     public string Summary => Upscale is not null
-        ? $"Same format, {Scale}× larger" + (IsBuiltIn ? " · built-in" : "")
+        ? $"Same format, {Scale}× larger"
         : IsResize
-        ? $"Same format, up to {MaxWidth ?? MaxHeight} px" + (IsBuiltIn ? " · built-in" : "")
+        ? $"Same format, up to {MaxWidth ?? MaxHeight} px"
         : IsOptimize
-        ? "Same format, smaller file" + (IsBuiltIn ? " · built-in" : "")
-        : $"{FormatCatalog.Find(TargetExtension)?.DisplayName ?? TargetExtension.ToUpperInvariant()} · {TargetKind}" + (IsBuiltIn ? " · built-in" : "");
+        ? "Same format, smaller file"
+        : string.Join(" · ", SummaryParts());
+
+    private IEnumerable<string> SummaryParts()
+    {
+        yield return FormatCatalog.Find(TargetExtension)?.DisplayName ?? TargetExtension.ToUpperInvariant();
+        if (Quality is { } quality)
+            yield return $"quality {quality}";
+        if ((MaxWidth ?? MaxHeight) is { } size)
+            yield return $"up to {size} px";
+        if (AudioBitrateKbps is { } kbps)
+            yield return $"{kbps} kbps";
+        if (VideoCrf is { } crf)
+            yield return $"CRF {crf}";
+        if (Fps is { } fps)
+            yield return $"{fps} fps";
+        if (StripMetadata)
+            yield return "no metadata";
+        if (Quality is null && MaxWidth is null && MaxHeight is null && AudioBitrateKbps is null && VideoCrf is null && Fps is null && !StripMetadata)
+            yield return "default settings";
+    }
+
+    /// <summary>What screen readers announce for a preset in a list.</summary>
+    public override string ToString() => Name;
 }

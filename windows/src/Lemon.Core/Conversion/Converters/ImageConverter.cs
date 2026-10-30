@@ -63,12 +63,25 @@ public sealed class ImageConverter : IConverter
             progress?.Report(1);
         }, cancellationToken);
 
+    /// <summary>
+    /// Through a stream: given a path, ImageMagick reads %d in it as a frame number, so "frame%03d.png" went to
+    /// "frame000.png", over anything of that name, and left the real output empty.
+    /// </summary>
+    internal static void Save(IMagickImage<byte> image, string path, MagickFormat format)
+    {
+        using var file = new FileStream(path, FileMode.Create);
+        image.Write(file, format);
+    }
+
+    /// <summary>The ImageMagick format for a file extension Lemon writes.</summary>
+    internal static MagickFormat FormatOf(string extension) => Formats[extension];
+
     private static void ConvertStill(ConversionRequest request, MagickFormat format)
     {
         using var image = new MagickImage(request.InputPath);
         image.AutoOrient();
         Prepare(image, request.Preset, format);
-        image.Write(request.OutputPath, format);
+        Save(image, request.OutputPath, format);
     }
 
     private static void ConvertAnimated(ConversionRequest request, MagickFormat format)
@@ -79,7 +92,8 @@ public sealed class ImageConverter : IConverter
             Prepare(frame, request.Preset, format);
         if (format == MagickFormat.Gif)
             frames.Optimize();
-        frames.Write(request.OutputPath, format);
+        using var file = new FileStream(request.OutputPath, FileMode.Create);
+        frames.Write(file, format);
     }
 
     /// <summary>One page per image; a multi-page TIFF becomes a multi-page PDF.</summary>
@@ -107,7 +121,8 @@ public sealed class ImageConverter : IConverter
                 page.Settings.Compression = CompressionMethod.Zip;
             }
         }
-        pages.Write(request.OutputPath, MagickFormat.Pdf);
+        using var file = new FileStream(request.OutputPath, FileMode.Create);
+        pages.Write(file, MagickFormat.Pdf);
     }
 
     /// <summary>

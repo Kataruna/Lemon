@@ -8,17 +8,23 @@
     xmlns:vm="using:Lemon.App.ViewModels"
     Background="Transparent">
 
-    <Grid Padding="24,16,24,16" ColumnSpacing="24">
+    <Page.Resources>
+        <CollectionViewSource x:Name="PresetGroups" IsSourceGrouped="True" />
+    </Page.Resources>
+
+    <Grid Padding="0,16,24,16" ColumnSpacing="24">
         <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="300" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
         <!-- Preset list -->
-        <Grid RowSpacing="12">
+        <Grid Grid.Column="1" RowSpacing="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Button HorizontalAlignment="Stretch" Command="{x:Bind ViewModel.NewCommand}" AutomationProperties.Name="New preset">
                 <StackPanel Orientation="Horizontal" Spacing="8">
@@ -29,8 +35,17 @@
             <ListView
                 Grid.Row="1"
                 Margin="-4,0"
-                ItemsSource="{x:Bind ViewModel.Items}"
+                ItemsSource="{Binding Source={StaticResource PresetGroups}}"
                 SelectedItem="{x:Bind ViewModel.Selected, Mode=TwoWay}">
+                <ListView.GroupStyle>
+                    <GroupStyle HidesIfEmpty="True">
+                        <GroupStyle.HeaderTemplate>
+                            <DataTemplate x:DataType="vm:PresetGroup">
+                                <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="{x:Bind Title}" />
+                            </DataTemplate>
+                        </GroupStyle.HeaderTemplate>
+                    </GroupStyle>
+                </ListView.GroupStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="presets:Preset">
                         <StackPanel Padding="0,6">
@@ -40,21 +55,31 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+            <TextBlock
+                Grid.Row="2"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap"
+                Text="Optimize, Remove background and Upscale have no settings here. They're on the wheel and in the Convert list." />
         </Grid>
 
         <!-- Editor -->
-        <ScrollViewer Grid.Column="1" Visibility="{x:Bind views:Ui.Visible(ViewModel.HasSelection), Mode=OneWay}">
+        <ScrollViewer Grid.Column="2" Visibility="{x:Bind views:Ui.Visible(ViewModel.HasSelection), Mode=OneWay}">
             <StackPanel Spacing="16" MaxWidth="560" HorizontalAlignment="Left" Padding="0,0,16,16">
                 <InfoBar
                     IsOpen="{x:Bind ViewModel.IsBuiltIn, Mode=OneWay}"
                     IsClosable="False"
                     Severity="Informational"
-                    Message="Built-in presets can't be changed. Duplicate this one to make your own version." />
+                    Message="Built-in presets can't be changed. Duplicate this one to make your own version.">
+                    <InfoBar.ActionButton>
+                        <Button Content="Duplicate" Command="{x:Bind ViewModel.DuplicateCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <TextBox Header="Name" Text="{x:Bind ViewModel.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}" />
 
                 <ComboBox
-                    Header="Format"
+                    Header="Convert to"
                     HorizontalAlignment="Stretch"
                     DisplayMemberPath="Label"
                     ItemsSource="{x:Bind vm:PresetsViewModel.TargetFormats}"
@@ -69,7 +94,8 @@
                         StepFrequency="1"
                         Header="Quality (higher looks better, makes bigger files)"
                         Value="{x:Bind ViewModel.Quality, Mode=TwoWay}"
-                        IsEnabled="{x:Bind ViewModel.UseQuality, Mode=OneWay}" />
+                        IsEnabled="{x:Bind ViewModel.IsEditable, Mode=OneWay}"
+                        Visibility="{x:Bind views:Ui.Visible(ViewModel.UseQuality), Mode=OneWay}" />
                 </StackPanel>
 
                 <Grid ColumnSpacing="12" Visibility="{x:Bind views:Ui.Visible(ViewModel.ShowSize), Mode=OneWay}">
@@ -98,7 +124,7 @@
                     IsOpen="{x:Bind ViewModel.NeedsSize, Mode=OneWay}"
                     IsClosable="False"
                     Severity="Warning"
-                    Message="Set a max width or height: pictures keep their format and are shrunk to fit, never enlarged. This preset goes on the Resize ring of the wheel." />
+                    Message="Set a max width or height. Pictures are shrunk to fit, never enlarged, and this preset goes on the wheel's Resize ring." />
 
                 <ComboBox
                     Header="Audio bitrate"
@@ -141,12 +167,49 @@
                     Text="Documents have no extra options."
                     Visibility="{x:Bind views:Ui.Visible(ViewModel.HasNoOptions), Mode=OneWay}" />
 
-                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-                    <Button Style="{StaticResource AccentButtonStyle}" Content="Save" Command="{x:Bind ViewModel.SaveCommand}" Visibility="{x:Bind views:Ui.Visible(ViewModel.IsEditable), Mode=OneWay}" />
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,8,0,0" Visibility="{x:Bind views:Ui.Visible(ViewModel.IsEditable), Mode=OneWay}">
+                    <Button Style="{StaticResource AccentButtonStyle}" Content="Save" Command="{x:Bind ViewModel.SaveCommand}" />
                     <Button Content="Duplicate" Command="{x:Bind ViewModel.DuplicateCommand}" />
-                    <Button Content="Delete" Command="{x:Bind ViewModel.DeleteCommand}" Visibility="{x:Bind views:Ui.Visible(ViewModel.IsEditable), Mode=OneWay}" />
+                    <Button Content="Delete" Command="{x:Bind ViewModel.DeleteCommand}" />
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Categories. Collapsed, the strip is only as wide as the icons and clips the names. -->
+        <Grid
+            x:Name="CategoryRail"
+            RowSpacing="8"
+            Padding="0,0,4,0"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="0,0,1,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Button
+                Margin="7,0,0,0"
+                Padding="10,8"
+                Background="Transparent"
+                BorderThickness="0"
+                Click="OnToggleCategories"
+                AutomationProperties.Name="Expand or collapse categories"
+                ToolTipService.ToolTip="Expand or collapse categories">
+                <FontIcon Glyph="&#xE700;" FontSize="16" />
+            </Button>
+            <ListView
+                Grid.Row="1"
+                ItemsSource="{x:Bind vm:PresetsViewModel.Categories}"
+                SelectedIndex="{x:Bind ViewModel.CategoryIndex, Mode=TwoWay}"
+                SelectionChanged="OnCategoryChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PresetCategory">
+                        <StackPanel Orientation="Horizontal" Spacing="20" ToolTipService.ToolTip="{x:Bind Name}">
+                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" />
+                            <TextBlock Text="{x:Bind Name}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
     </Grid>
 </Page>

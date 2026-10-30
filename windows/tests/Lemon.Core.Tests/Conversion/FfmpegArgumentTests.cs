@@ -33,6 +33,7 @@ public class FfmpegArgumentTests
         var args = Args("in.mp4", BuiltInPresets.All.Single(p => p.Id == "vid-gif"));
         var filter = args[args.IndexOf("-vf") + 1];
         Assert.StartsWith("fps=12,scale=w='min(iw,480)'", filter);
+        Assert.Contains("force_original_aspect_ratio=decrease", filter);
         Assert.Contains("palettegen", filter);
     }
 

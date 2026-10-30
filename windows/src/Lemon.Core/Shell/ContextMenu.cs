@@ -20,6 +20,17 @@ public static partial class ContextMenu
         [MediaKind.Document] = ["pdf", "docx", "html"],
     };
 
+    /// <summary>AI entries: the first preset whose model is downloaded is used, so the lighter model wins.</summary>
+    private static readonly (string Key, string Label, string[] PresetIds)[] AiActions =
+    [
+        ("nobg", "Remove background", ["img-nobg", "img-nobg-full"]),
+        ("upscale2", "Upscale 2×", ["upscale-2x", "upscale-2x-full"]),
+        ("upscale4", "Upscale 4×", ["upscale-4x", "upscale-4x-full"]),
+    ];
+
+    /// <summary>ECF_SEPARATORBEFORE: a line above the entry.</summary>
+    private const int SeparatorBefore = 0x20;
+
     public static bool IsRegistered(RegistryKey? classesRoot = null)
     {
         using var root = classesRoot is null ? OpenClassesRoot() : null;
@@ -30,9 +41,10 @@ public static partial class ContextMenu
     /// <summary>
     /// Registers the menu for each extension. <paramref name="canConvert"/> filters out quick targets
     /// that the current machine can't produce (e.g. PDF without LibreOffice); it's also asked about
-    /// <see cref="Preset.SameFormat"/> to decide whether to offer "Optimize".
+    /// <see cref="Preset.SameFormat"/> to decide whether to offer "Optimize". <paramref name="canRun"/> says whether a
+    /// preset works on an extension, which for Remove background and Upscale means their model is downloaded.
     /// </summary>
-    public static void Register(string exePath, Func<string, string, bool> canConvert, RegistryKey? classesRoot = null)
+    public static void Register(string exePath, Func<string, string, bool> canConvert, Func<string, Preset, bool> canRun, RegistryKey? classesRoot = null)
     {
         using var root = classesRoot is null ? OpenClassesRoot() : null;
         var classes = (classesRoot ?? root)!;
@@ -43,7 +55,11 @@ public static partial class ContextMenu
             classes.DeleteSubKeyTree(VerbPath(ext), throwOnMissingSubKey: false);
 
             // No menu for files this machine can't convert at all (e.g. PDF, or .docx without Pandoc/LibreOffice).
-            if (!FormatCatalog.Extensions.Append(Preset.SameFormat).Any(to => canConvert(ext, to)))
+            var ai = AiActions
+                .Select(a => (a.Key, a.Label, Preset: a.PresetIds.Select(id => BuiltInPresets.All.First(p => p.Id == id)).FirstOrDefault(p => canRun(ext, p))))
+                .Where(a => a.Preset is not null)
+                .ToList();
+            if (ai.Count == 0 && !FormatCatalog.Extensions.Append(Preset.SameFormat).Any(to => canConvert(ext, to)))
                 continue;
 
             var kind = FormatCatalog.KindOf(ext)!.Value;
@@ -53,15 +69,33 @@ public static partial class ContextMenu
             verb.SetValue("SubCommands", "");
 
             AddCommand(verb, "01open", "Open in Lemon…", $"\"{exePath}\" \"%1\"");
+            // Three groups with a line between them: open, change this file, convert it to another format.
             var order = 2;
+            var line = true;
             if (canConvert(ext, Preset.SameFormat))
-                AddCommand(verb, $"{order++:00}optimize", "Optimize (smaller file)", $"\"{exePath}\" {LaunchRequest.OptimizeArgument} \"%1\"");
+            {
+                AddCommand(verb, $"{order++:00}optimize", "Optimize (smaller file)", $"\"{exePath}\" {LaunchRequest.OptimizeArgument} \"%1\"", line);
+                line = false;
+            }
+            foreach (var (key, label, preset) in ai)
+            {
+                AddCommand(verb, $"{order++:00}{key}", label, $"\"{exePath}\" {LaunchRequest.PresetArgument} {preset!.Id} \"%1\"", line);
+                line = false;
+            }
+            line = true;
             foreach (var target in QuickTargets[kind].Where(t => t != ext && canConvert(ext, t)))
-                AddCommand(verb, $"{order++:00}to{target}", $"To {target.ToUpperInvariant()}", $"\"{exePath}\" --to {target} \"%1\"");
+            {
+                AddCommand(verb, $"{order++:00}to{target}", $"To {target.ToUpperInvariant()}", $"\"{exePath}\" --to {target} \"%1\"", line);
+                line = false;
+            }
         }
 
         NotifyShell();
     }
+
+    /// <summary>Registers the menu with what this machine can do right now, e.g. after a tool or model was added.</summary>
+    public static void Register(string exePath, ConversionService conversion) =>
+        Register(exePath, (from, to) => conversion.FindConverter(from, to) is not null, conversion.CanConvert);
 
     public static void Unregister(RegistryKey? classesRoot = null)
     {
@@ -76,10 +110,12 @@ public static partial class ContextMenu
 
     private static string VerbPath(string extension) => $@"SystemFileAssociations\.{extension}\shell\{VerbName}";
 
-    private static void AddCommand(RegistryKey verb, string keyName, string label, string command)
+    private static void AddCommand(RegistryKey verb, string keyName, string label, string command, bool lineAbove = false)
     {
         using var item = verb.CreateSubKey($@"shell\{keyName}");
         item.SetValue("MUIVerb", label);
+        if (lineAbove)
+            item.SetValue("CommandFlags", SeparatorBefore, RegistryValueKind.DWord);
         using var cmd = item.CreateSubKey("command");
         cmd.SetValue("", command);
     }

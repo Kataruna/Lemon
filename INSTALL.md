@@ -70,7 +70,7 @@ Lemon isn't code-signed yet, so the first time you run a download, Windows may s
 To check the download first, compare its SHA-256 (shown next to each file on the release page) with:
 
 ```powershell
-Get-FileHash .\Lemon-0.5.0-Setup.exe -Algorithm SHA256
+Get-FileHash .\Lemon-0.6.0-Setup.exe -Algorithm SHA256
 ```
 
 ### First steps on Windows

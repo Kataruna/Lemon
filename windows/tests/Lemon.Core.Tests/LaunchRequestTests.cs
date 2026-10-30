@@ -29,4 +29,13 @@ public class LaunchRequestTests
         Assert.True(LaunchRequest.Parse(["--to", "png", "a.jpg"]).StaysInBackground);
         Assert.False(LaunchRequest.Parse(["a.jpg"]).StaysInBackground);
     }
+
+    [Fact]
+    public void PresetLaunchNamesThePresetAndStaysHidden()
+    {
+        var request = LaunchRequest.Parse(["--preset", "upscale-2x", @"C:\shot.png"]);
+        Assert.Equal("upscale-2x", request.PresetId);
+        Assert.Equal([@"C:\shot.png"], request.Files);
+        Assert.True(request.StaysInBackground);
+    }
 }
