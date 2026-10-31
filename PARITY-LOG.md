@@ -11,6 +11,19 @@ Status: **Done** · **To do** · **Won't do** (with the reason) · **Partly** (s
 
 ---
 
+## 2026-10-31: Commands ring shows right away for dragged folders
+
+| Windows | Mac |
+|---|---|
+| **Done** (the original) | **Won't do**: not needed. The Mac only samples a folder (first 5,000 entries) before showing the wheel, so it never waited for a full listing |
+
+- Shaking a dragged folder used to show an empty wheel for about a second before the Commands ring came up: the wheel listed every file in the folder and its subfolders (to know which formats to offer) before putting up any ring. Commands only need the folders themselves, so when only folders are dragged and there's a command for folders, the Commands ring now goes up straight away. The other rings (Convert, Optimize…) join once the listing finishes, without the Commands slices popping in a second time.
+- Dropping on a command (or picking it with the wheel key) runs it straight away too, instead of waiting for the listing. A drop on the middle still waits, since it adds every file inside.
+- Not compiled or run: made in a Linux cloud session with no .NET or Windows.
+- Windows files: `Lemon.App/Wheel/WheelWindow.xaml.cs` (`LoadAsync`, `ShowPlan`, `ReadyNow`, `_commandsEarly`).
+
+---
+
 ## 2026-10-31: Review fixes (names with %, right-click after a cutout, cancelling, GIF height)
 
 | Windows | Mac |

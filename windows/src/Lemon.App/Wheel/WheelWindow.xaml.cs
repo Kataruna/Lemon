@@ -76,6 +76,11 @@ public sealed partial class WheelWindow : Window
     /// <summary>The dragged files (not what's inside folders), folders and web links, for the Commands ring.</summary>
     private List<string> _files = [], _folders = [], _links = [];
     private Task? _loading;
+    /// <summary>
+    /// The Commands ring went up for dragged folders before looking inside them finished, so a command can run
+    /// without waiting for that (it only needs the folders themselves).
+    /// </summary>
+    private bool _commandsEarly;
     private IReadOnlyList<Preset> _choices = [];
     /// <summary>The rings for the dragged files and their presets, once the files are known.</summary>
     private WheelPlan _plan = WheelPlan.Empty;
@@ -179,6 +184,7 @@ public sealed partial class WheelWindow : Window
         _paths = null;
         _files = _folders = _links = [];
         _loading = null;
+        _commandsEarly = false;
         // Pick up tools installed while Lemon sat in the tray.
         App.Conversion.RefreshTools();
         _dropped = false;
@@ -382,10 +388,19 @@ public sealed partial class WheelWindow : Window
     private async Task LoadAsync(List<string> dragged, int opening)
     {
         List<string> paths;
+        var foldersOnly = false;
         try
         {
             _folders = [.. dragged.Where(Directory.Exists)];
             _files = [.. dragged.Where(File.Exists)];
+            foldersOnly = _folders.Count > 0 && _folders.Count == dragged.Count;
+            // Folders on their own open on Commands, which only needs the folders, not what's inside them. Put that
+            // ring up now: reading a big folder (a project with node_modules, .git…) can take a second or more.
+            if (foldersOnly && App.Settings.Wheel.Commands.Any(c => c.RunsOn == RunsOn.Folders))
+            {
+                ShowPlan([], foldersOnly, animate: true);
+                _commandsEarly = true;
+            }
             // A dragged folder could be huge (even a whole drive), so look inside it off the UI thread. All of it: these
             // are the files a drop converts, so a cap would silently leave the rest of a big folder out.
             paths = await Task.Run(() => QueueViewModel.ExpandFolders(dragged).ToList());
@@ -398,19 +413,30 @@ public sealed partial class WheelWindow : Window
         if (opening != _openCount)
             return;
         _paths = paths;
+        // Already dropped on the early Commands ring: the command is running and the wheel is saying so; a drop on
+        // the middle only needs the paths.
+        if (_commandsEarly && _dropped)
+            return;
+        // The early ring was Commands and the full plan opens on Commands too, so don't bloom the same slices again.
+        ShowPlan(paths, foldersOnly, animate: !_commandsEarly);
+    }
 
+    /// <summary>Puts up the rings for <paramref name="paths"/> (the files to convert) and the dragged items' commands.</summary>
+    /// <param name="foldersOnly">Only folders were dragged, so the wheel opens on Commands.</param>
+    private void ShowPlan(IReadOnlyList<string> paths, bool foldersOnly, bool animate)
+    {
         try
         {
             // Only rings with something for these files, so e.g. PDFs (which can only be optimized) open on Optimize.
             // Folders on their own open on Commands: a project folder nearly always has something convertible inside.
-            _plan = Plan(_paths, [.. App.Settings.Wheel.Commands.Where(c => Targets(c).Count > 0)], onCommands: _folders.Count > 0 && _folders.Count == dragged.Count);
+            _plan = Plan(paths, [.. App.Settings.Wheel.Commands.Where(c => Targets(c).Count > 0)], onCommands: foldersOnly);
             _ring = _plan.Start;
             _inHub = _plan.OpensOnHub;
-            _centerText = !_paths.Any(FormatCatalog.IsSupported) && _plan.Rings.Count > 0 ? "Drop on a command"
-                : _paths.Count == 0 ? "Lemon can't convert these"
+            _centerText = !paths.Any(FormatCatalog.IsSupported) && _plan.Rings.Count > 0 ? "Drop on a command"
+                : paths.Count == 0 ? "Lemon can't convert these"
                 : _plan.Rings.Count == 0 ? "Mixed file types: add to queue"
                 : "Add to queue";
-            ShowSlices(animate: true);
+            ShowSlices(animate);
             UpdatePageButton();
             UpdateHover(_pointer is { } point ? HitTest(point) : _hover, force: true);
         }
@@ -422,6 +448,12 @@ public sealed partial class WheelWindow : Window
             ShowCenter();
         }
     }
+
+    /// <summary>
+    /// Whether slice <paramref name="hit"/> can act before loading finishes: a command on the early Commands ring,
+    /// which runs on the folders themselves.
+    /// </summary>
+    private bool ReadyNow(int hit) => _commandsEarly && hit >= 0 && hit < _choices.Count && _choices[hit].CommandId is not null;
 
     private void OnDragOver(object sender, DragEventArgs e)
     {
@@ -562,7 +594,7 @@ public sealed partial class WheelWindow : Window
         _follow.Stop();
         _dropped = true;
         _pageTimer.Stop();
-        if (_loading is not null)
+        if (_loading is not null && !ReadyNow(hit))
             await _loading;
         Act(hit);
     }
@@ -580,7 +612,7 @@ public sealed partial class WheelWindow : Window
         _pageTimer.Stop();
         // Last chance to read the files if no drag event managed to (only possible for a drop on the hub).
         StartLoading(e);
-        if (_loading is not null)
+        if (_loading is not null && !ReadyNow(hit))
             await _loading;
         Act(hit);
     }
